@@ -1,0 +1,194 @@
+name: Deploy
+
+# Deploys the Worker after a reviewed change lands on main. Not triggered by pull requests of any kind, so a fork PR
+# or an unreviewed branch can never reach the Cloudflare credentials. Only the `deploy` job sees them, as secrets of
+# the `production` GitHub environment, where the maintainer can also require a manual approval.
+# Setup, rollback and what this workflow deliberately does not touch: docs/operations.md#continuous-deployment
+on:
+  push:
+    branches: [main]
+    # Only changes that alter the deployed Worker. Docs, tests and scripts do not deploy.
+    paths:
+      - "src/**"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  # Repeats the CI checks on the merged commit. No secrets.
+  verify:
+    name: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Bundles the Worker without deploying; needs no Cloudflare credentials.
+      - name: Wrangler dry-run build
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/out"
+
+      - name: End-to-end scenarios
+        run: npm run e2e
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs
+          path: e2e-logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    name: deploy
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    # Queue, never cancel: a deploy that is cut off midway is worse than a late one. If several merges land while one
+    # deploys, GitHub keeps only the newest as pending, so the last deploy is always the newest commit.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      # Set the repository or environment variable WORKER_URL to override (a custom domain, say).
+      WORKER_URL: ${{ vars.WORKER_URL || 'https://judgement-gate.elroy-galbraith.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # No Cloudflare credentials here: install scripts never see the token.
+      - run: npm ci
+
+      # The live version, kept as the rollback target. A failure here must not block the deploy.
+      - name: Record the live version
+        id: previous
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          prev=""
+          if out=$(npx wrangler deployments list --json 2>/dev/null); then
+            prev=$(printf '%s' "$out" | node -e '
+              let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
+                try {
+                  const live = JSON.parse(s).sort((a, b) => String(a.created_on).localeCompare(String(b.created_on))).pop();
+                  const top = [...live.versions].sort((a, b) => b.percentage - a.percentage)[0];
+                  if (/^[0-9a-f-]{36}$/.test(top.version_id)) process.stdout.write(top.version_id);
+                } catch {}
+              });
+            ') || prev=""
+          fi
+          echo "version_id=${prev:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "Live version before this deploy: ${prev:-unknown}"
+
+      # wrangler.toml is the source of truth for non-secret vars: no --keep-vars, so vars set only in the dashboard are
+      # removed. Worker secrets are never uploaded, changed or deleted by a deploy.
+      - name: Deploy
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          export WRANGLER_OUTPUT_FILE_PATH="$RUNNER_TEMP/wrangler-output.ndjson"
+          npx wrangler deploy --message "$GITHUB_SHA"
+          id=$(node -e '
+            const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
+            const d = lines.map((l) => JSON.parse(l)).reverse().find((e) => e.type === "deploy");
+            if (d && /^[0-9a-f-]{36}$/.test(d.version_id)) process.stdout.write(d.version_id);
+          ' "$WRANGLER_OUTPUT_FILE_PATH" || true)
+          echo "version_id=${id:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "Deployed version: ${id:-unknown}"
+
+      # The handler checks the signature before it reads the event, so an unsigned POST must get 401 `invalid signature`.
+      # That shows the new version boots, routes /webhook and has GITHUB_WEBHOOK_SECRET bound, and it calls no one.
+      - name: Smoke test
+        env:
+          NEW_VERSION_ID: ${{ steps.deploy.outputs.version_id }}
+          PREVIOUS_VERSION_ID: ${{ steps.previous.outputs.version_id }}
+        run: |
+          set -uo pipefail
+          url="${WORKER_URL%/}/webhook"
+          body_file="$RUNNER_TEMP/smoke-body"
+          ok=false
+          code=000
+          for attempt in 1 2 3 4 5; do
+            : > "$body_file"
+            code=$(curl -sS -m 15 -o "$body_file" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{}' "$url") || code=000
+            body=$(cat "$body_file" 2>/dev/null || true)
+            echo "attempt $attempt: HTTP $code, body: $body"
+            if [ "$code" = "401" ] && [ "$body" = "invalid signature" ]; then ok=true; break; fi
+            sleep 6
+          done
+
+          if [ "$PREVIOUS_VERSION_ID" != "unknown" ]; then
+            rollback="npx wrangler rollback $PREVIOUS_VERSION_ID"
+          else
+            rollback="npx wrangler versions list   # pick the last good version id, then: npx wrangler rollback <version id>"
+          fi
+          {
+            if [ "$ok" = true ]; then echo "## Deployed"; else echo "## Deployed, but the smoke test FAILED"; fi
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- New version id: \`$NEW_VERSION_ID\`"
+            echo "- Previous version id: \`$PREVIOUS_VERSION_ID\`"
+            echo "- Smoke test: POST $url, expected 401 \`invalid signature\`, got HTTP $code"
+            echo
+            echo "Roll back with (needs a Cloudflare login or token, run it from a checkout):"
+            echo
+            echo '```bash'
+            echo "$rollback"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ok" != true ]; then
+            echo "::error::Smoke test failed: expected HTTP 401 'invalid signature' from $url, got HTTP $code."
+            echo "The new version is live. To go back to the previous one, run: $rollback"
+            exit 1
+          fi
+
+      - name: Note a failed deploy
+        if: failure() && steps.deploy.outcome == 'failure'
+        env:
+          PREVIOUS_VERSION_ID: ${{ steps.previous.outputs.version_id }}
+        run: |
+          {
+            echo "## Deploy FAILED"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Live version before this run: \`$PREVIOUS_VERSION_ID\`"
+            echo
+            echo "wrangler reported an error, so production should still be on that version. Check with \`npx wrangler deployments list\`."
+          } >> "$GITHUB_STEP_SUMMARY"
