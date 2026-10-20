@@ -102,6 +102,8 @@ The mock logs `LABEL added on #n: ...` when the gate labels a PR (scenarios 1 an
    npx wrangler deploy
    ```
 
+Once set up, merges to `main` that change the Worker deploy it through GitHub Actions instead of by hand: see [Continuous deployment](docs/operations.md#continuous-deployment) for the triggers, the one-time Cloudflare token and GitHub environment setup, and how to roll back. Worker secrets are still set by hand as above.
+
 ## Suggested rollout
 
 1. **Shadow on a few repos (2 weeks).** `MODE = "shadow"` is the default: the check always passes. Pick repos with real migrations, infra changes and agent-authored PRs.
