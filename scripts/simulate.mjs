@@ -20,7 +20,7 @@ const payload = JSON.stringify({
     body: s.body,
     draft: false,
     base: { ref: "main" },
-    head: { sha: crypto.randomBytes(20).toString("hex") },
+    head: { ref: `scenario-${n}`, sha: crypto.randomBytes(20).toString("hex") },
   },
   ...(action === "edited" ? { changes: { body: { from: "" } } } : {}),
 });

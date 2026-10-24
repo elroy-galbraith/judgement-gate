@@ -182,7 +182,13 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     // One comment per PR: remediation, human routing, or an update-only passing note.
     let commentNote = "";
     const failing = results.filter((r) => r.verdict.conclusion === "failure");
-    const rc = { owner, repo, headRef: ev.pull_request.head.sha };
+    const head = ev.pull_request.head;
+    const headRepo = head.repo === undefined ? ev.repository : head.repo;
+    const rc = {
+      owner: headRepo?.owner.login ?? owner,
+      repo: headRepo?.name ?? repo,
+      headRef: headRepo ? head.ref : undefined,
+    };
     const routedToHuman = failing.length === 0 && routing?.route === "human";
     try {
       const body = routedToHuman ? renderRoutingComment(routing!, rc, mode, routingMode, results) : renderComment(failing, rc, mode, routing, results, routingMode);

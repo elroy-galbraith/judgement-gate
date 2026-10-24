@@ -32,7 +32,11 @@ export interface PullRequestEvent {
     body: string | null;
     draft?: boolean;
     base: { ref: string };
-    head: { sha: string };
+    head: {
+      sha: string;
+      ref?: string;
+      repo?: { name: string; owner: { login: string }; fork?: boolean } | null;
+    };
   };
   changes?: { title?: unknown; body?: unknown; base?: unknown };
 }
@@ -98,7 +102,7 @@ export interface JudgementVerdict {
 export interface RemedyContext {
   owner: string;
   repo: string;
-  headRef: string;
+  headRef?: string;
 }
 
 /** Machine-readable ways to clear a failing judgement. Never contains PR or diff content. */

@@ -97,6 +97,27 @@ describe("one-way-door judgement", () => {
   it("carries appliesTo", () => {
     expect(oneWayDoor({ appliesTo: ["db/**"] }).appliesTo).toEqual(["db/**"]);
   });
+  it("remedy uses the branch name (not SHA) and falls back to plain text with the path when headRef is absent", () => {
+    const verdict = j.decide(type1, pr());
+    const withBranch = j.remedy(verdict, { owner: "o", repo: "r", headRef: "feat/add-adr" });
+    expect(withBranch.fix).toContain("https://github.com/o/r/new/feat/add-adr?filename=docs/decisions/0001-title.md");
+    expect(withBranch.fix).not.toContain("/new/abc");
+
+    const fallback = j.remedy(verdict, { owner: "o", repo: "r" });
+    expect(fallback.fix).toContain("`docs/decisions/NNNN-short-title.md`");
+    expect(fallback.fix).not.toContain("Create one");
+    expect(fallback.fix).not.toContain("/new/");
+  });
+  it("remedy escapes parentheses and RFC 3986 sub-delims in branch names so markdown links do not break", () => {
+    const verdict = j.decide(type1, pr());
+    const withParens = j.remedy(verdict, { owner: "o", repo: "r", headRef: "feature/fix)(x)" });
+    expect(withParens.fix).toContain("%29%28x%29");
+    const match = withParens.fix.match(/\[Create one\]\((https:\/\/[^)]+)\)\./);
+    expect(match).not.toBeNull();
+    const url = match![1];
+    expect(url).toBe("https://github.com/o/r/new/feature/fix%29%28x%29?filename=docs/decisions/0001-title.md");
+    expect(url).not.toContain(")");
+  });
 });
 
 describe("one-way-door probes", () => {

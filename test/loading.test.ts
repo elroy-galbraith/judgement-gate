@@ -228,4 +228,37 @@ describe("multiple judgements", () => {
     expect(finalCheck(net.calls).conclusion).toBe("neutral");
     expect(finalCheck(net.calls).output.summary).toContain("Config error");
   });
+
+  it("one-way-door comment links to the PR head branch name, not the head SHA", async () => {
+    const net = fakeNet({ config: { status: 404 }, answers: type1 });
+    const ev = prEvent();
+    ev.pull_request.head = { sha: "deadbeef1234", ref: "feat/db-migration" };
+    await processPullRequest(ev, await makeEnv(), net.fetchFn);
+    const md = postedComment(net.calls)!;
+    expect(md).toContain("https://github.com/o/r/new/feat/db-migration?filename=docs/decisions/0001-title.md");
+    expect(md).not.toContain("deadbeef1234");
+  });
+
+  it("one-way-door comment links to the fork repo and branch for fork PRs, or falls back to plain text when fork repo is null", async () => {
+    const netFork = fakeNet({ config: { status: 404 }, answers: type1 });
+    const forkEv = prEvent();
+    forkEv.pull_request.head = {
+      sha: "deadbeef1234",
+      ref: "patch-1",
+      repo: { name: "r-fork", owner: { login: "contributor" }, fork: true },
+    };
+    await processPullRequest(forkEv, await makeEnv(), netFork.fetchFn);
+    const forkMd = postedComment(netFork.calls)!;
+    expect(forkMd).toContain("https://github.com/contributor/r-fork/new/patch-1?filename=docs/decisions/0001-title.md");
+    expect(forkMd).not.toContain("deadbeef1234");
+
+    const netDeletedFork = fakeNet({ config: { status: 404 }, answers: type1 });
+    const deletedForkEv = prEvent();
+    deletedForkEv.pull_request.head = { sha: "deadbeef1234", ref: "patch-1", repo: null };
+    await processPullRequest(deletedForkEv, await makeEnv(), netDeletedFork.fetchFn);
+    const fallbackMd = postedComment(netDeletedFork.calls)!;
+    expect(fallbackMd).toContain("`docs/decisions/NNNN-short-title.md`");
+    expect(fallbackMd).not.toContain("/new/");
+    expect(fallbackMd).not.toContain("deadbeef1234");
+  });
 });

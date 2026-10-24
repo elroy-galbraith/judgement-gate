@@ -2,6 +2,8 @@ import { evaluatePolicy } from "../policy";
 import type { Judgement, JevAnswers, JevResult, JudgementVerdict } from "../types";
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+const encodeSegment = (s: string) =>
+  encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 const FENCE = "```";
 const REVERSAL_TEMPLATE = [
   "Reversal Trigger: <signal that tells us to roll back, e.g. error rate > 2% for 5 min>",
@@ -120,14 +122,20 @@ export function oneWayDoor(opts: OneWayDoorOptions = {}): Judgement {
             why: "The change looks like a one-way door (schema, auth or infrastructure), so it is hard to undo. The ADR records the reasoning, but a person who is accountable for the decision still reviews it.",
             fix: "Nothing to fix. A reviewer will read the ADR and check the rollback limits it names.",
           };
-        case "type1_no_adr":
+        case "type1_no_adr": {
+          const pathInstruction =
+            "Add an Architecture Decision Record at `docs/decisions/NNNN-short-title.md` covering context, decision, alternatives, consequences and rollback limits.";
+          const encodedRef = rc.headRef ? rc.headRef.split("/").map(encodeSegment).join("/") : "";
           return {
             why: "The change looks like a one-way door (schema, auth or infrastructure). Once it ships it is hard to undo, so the reasoning behind it must be recorded where the next person will find it.",
-            fix: [
-              "Add an Architecture Decision Record at `docs/decisions/NNNN-short-title.md` covering context, decision, alternatives, consequences and rollback limits.",
-              `[Create one](https://github.com/${rc.owner}/${rc.repo}/new/${rc.headRef}?filename=docs/decisions/0001-title.md).`,
-            ].join("\n"),
+            fix: encodedRef
+              ? [
+                  pathInstruction,
+                  `[Create one](https://github.com/${rc.owner}/${rc.repo}/new/${encodedRef}?filename=docs/decisions/0001-title.md).`,
+                ].join("\n")
+              : pathInstruction,
           };
+        }
         case "type2_no_plan":
           return {
             why: "The change is reversible, but only if someone knows when and how to reverse it. The PR description has no concrete reversal plan.",
