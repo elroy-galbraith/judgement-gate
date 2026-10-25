@@ -118,7 +118,9 @@ export interface RemedyContext {
 export type AgentSatisfiedBy =
   | { type: "pr_body_matches"; regex: string; flags?: string; template?: string }
   | { type: "pr_body_fields"; fields: string[]; template: string }
-  | { type: "file_added"; glob: string; example_path?: string };
+  | { type: "file_added"; glob: string; example_path?: string }
+  /** The model must judge that the PR description gives a concrete answer to `question` (not n/a, none or tbd). */
+  | { type: "answers"; question: string };
 
 export interface AgentHint {
   threshold?: number;
