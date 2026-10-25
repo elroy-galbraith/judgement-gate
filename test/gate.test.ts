@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { verifySignature } from "../src/crypto";
-import { handleWebhook, processPullRequest } from "../src/handler";
+import { handleWebhook, processMergeGroup, processPullRequest } from "../src/handler";
 import { buildPatchExtract, clearInstallationTokenCache, COMMENT_MARKER, installationToken } from "../src/github";
 import { evaluatePolicy } from "../src/policy";
-import type { Env, JevResult, PullRequestEvent } from "../src/types";
+import type { Env, JevResult, MergeGroupEvent, PullRequestEvent } from "../src/types";
 
 const j = (o: Partial<JevResult> = {}): JevResult => ({
   oneWayProb: 0.05,
@@ -377,6 +377,105 @@ describe("end to end", () => {
   });
 });
 
+/** Wrap a fake network so that the first `times` calls whose URL matches (and method, if given) answer 500. */
+function failing(net: ReturnType<typeof fakeNet>, match: (url: string, method: string) => boolean, times = Infinity) {
+  let seen = 0;
+  const fetchFn = ((input: any, init: any = {}) =>
+    match(String(input), init.method ?? "GET") && seen++ < times ? Promise.resolve(new Response("down", { status: 500 })) : net.fetchFn(input, init)) as typeof fetch;
+  return fetchFn;
+}
+const answer = () => new Response(JSON.stringify(jevAnswer({ one: 0.02, add: 0.9, rev: 0.9, cls: "TYPE_2_TWO_WAY_DOOR", conf: 0.9 })));
+const createsCheck = (u: string, m: string) => m === "POST" && u.endsWith("/check-runs");
+const completesCheck = (u: string, m: string) => m === "PATCH" && u.includes("/check-runs/55");
+const noWait = [0, 0];
+
+describe("required check is never left missing or in progress (issue #14)", () => {
+  it("failing to list files after the check run exists completes it neutral", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    const v = await processPullRequest(prEvent(), env, failing(net, (u) => u.includes("/pulls/7/files")), noWait);
+    expect(v.reason).toBe("degraded");
+    expect(finalCheck(net.calls).conclusion).toBe("neutral");
+    expect(finalCheck(net.calls).output.title).toBe("[Audit Degraded]");
+  });
+
+  it("retries a failed token request", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, failing(net, (u) => u.endsWith("/access_tokens"), 2), noWait);
+    expect(net.calls.filter((c) => c.url.endsWith("/access_tokens"))).toHaveLength(1);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
+  it("retries a failed check run creation", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, failing(net, createsCheck, 2), noWait);
+    expect(net.calls.filter((c) => createsCheck(c.url, c.method))).toHaveLength(1);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
+  it("retries completing the check run", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, failing(net, completesCheck, 2), noWait);
+    expect(net.calls.filter((c) => completesCheck(c.url, c.method))).toHaveLength(1);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
+  it("gives up after three attempts and reports nothing when no check run can be created", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    let attempts = 0;
+    const down = failing(net, createsCheck);
+    const fetchFn = ((input: any, init: any = {}) => {
+      if (createsCheck(String(input), init.method ?? "GET")) attempts++;
+      return down(input, init);
+    }) as typeof fetch;
+    await expect(processPullRequest(prEvent(), env, fetchFn, noWait)).rejects.toThrow(/check-runs/);
+    expect(attempts).toBe(3);
+    expect(net.calls.some((c) => c.method === "PATCH")).toBe(false);
+    expect(net.calls.some((c) => c.url.includes("jev.test"))).toBe(false);
+  });
+
+  it("gives up after three attempts when no installation token can be made", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    let attempts = 0;
+    const down = failing(net, (u) => u.endsWith("/access_tokens"));
+    const fetchFn = ((input: any, init: any = {}) => {
+      if (String(input).endsWith("/access_tokens")) attempts++;
+      return down(input, init);
+    }) as typeof fetch;
+    await expect(processPullRequest(prEvent(), env, fetchFn, noWait)).rejects.toThrow(/installation token/);
+    expect(attempts).toBe(3);
+    expect(net.calls).toHaveLength(0);
+  });
+
+  it("still resolves when the check run cannot be completed at all", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    const attempts: string[] = [];
+    const fetchFn = ((input: any, init: any = {}) => {
+      if (completesCheck(String(input), init.method ?? "GET")) attempts.push(init.body);
+      return failing(net, completesCheck)(input, init);
+    }) as typeof fetch;
+    const v = await processPullRequest(prEvent(), env, fetchFn, noWait);
+    expect(v.reason).toBe("degraded");
+    // Three attempts at the real verdict, then three at the neutral fallback.
+    expect(attempts).toHaveLength(6);
+    expect(JSON.parse(attempts[0]).conclusion).toBe("success");
+    expect(JSON.parse(attempts[5]).conclusion).toBe("neutral");
+  });
+});
+
 describe("webhook filtering", () => {
   async function post(ev: any, opts: { event?: string; sig?: string | null } = {}) {
     const env = await makeEnv();
@@ -414,6 +513,37 @@ describe("webhook filtering", () => {
   });
   it("processes ready_for_review", async () => {
     expect((await post(prEvent({ action: "ready_for_review" }))).started).toBe(true);
+  });
+
+  const mergeGroup = (over: Partial<MergeGroupEvent> = {}): MergeGroupEvent => ({
+    action: "checks_requested",
+    installation: { id: 9 },
+    repository: { name: "r", owner: { login: "o" } },
+    merge_group: { head_sha: "queue-sha", head_ref: "refs/heads/gh-readonly-queue/main/pr-7-abc", base_ref: "refs/heads/main" },
+    ...over,
+  });
+
+  it("reports success on the merge group head without evaluating it (issue #14)", async () => {
+    const r = await post(mergeGroup(), { event: "merge_group" });
+    expect(r.res.status).toBe(202);
+    expect(r.started).toBe(true);
+    const created = r.net.calls.filter((c) => c.method === "POST" && c.url.endsWith("/check-runs"));
+    expect(created).toHaveLength(1);
+    expect(created[0].body).toMatchObject({ name: "judgement-gate", head_sha: "queue-sha", status: "completed", conclusion: "success" });
+    expect(r.net.calls.some((c) => c.url.includes("jev.test") || c.url.includes("/pulls/"))).toBe(false);
+    expect(r.net.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+  it("ignores merge group events other than checks_requested, or without an installation", async () => {
+    expect((await post(mergeGroup({ action: "destroyed" }), { event: "merge_group" })).started).toBe(false);
+    expect((await post(mergeGroup({ installation: undefined }), { event: "merge_group" })).started).toBe(false);
+  });
+  it("retries a failed merge group check", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processMergeGroup(mergeGroup(), env, failing(net, createsCheck, 2), noWait);
+    expect(net.calls.filter((c) => createsCheck(c.url, c.method))).toHaveLength(1);
+    await expect(processMergeGroup(mergeGroup(), env, failing(net, createsCheck), noWait)).rejects.toThrow(/check-runs/);
   });
 });
 

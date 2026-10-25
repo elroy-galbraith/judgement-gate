@@ -7,9 +7,24 @@ import { assembleContext, GitHubClient, installationToken } from "./github";
 import { evaluate } from "./jev";
 import { appliesToFiles } from "./glob";
 import { DEFAULT_LABEL, evaluateRouting, type RoutingResult, type RoutingSetup } from "./routing";
-import type { ChangedFile, Env, Judgement, FetchFn, IssueCommentEvent, PullRequestEvent, Verdict } from "./types";
+import type { ChangedFile, Env, Judgement, FetchFn, IssueCommentEvent, MergeGroupEvent, PullRequestEvent, Verdict } from "./types";
 
 const ACTIONS = new Set(["opened", "synchronize", "reopened", "edited", "ready_for_review"]);
+
+/** Pauses before each retry of a GitHub call the required check depends on: at most 3 attempts, about 1s of waiting. */
+const RETRY_DELAYS_MS = [250, 750];
+
+async function withRetry<T>(fn: () => Promise<T>, delaysMs: number[]): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= delaysMs.length) throw e;
+      console.error(`judgement-gate retrying after: ${(e as Error).message}`);
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+}
 
 export interface Deps {
   fetchFn: FetchFn;
@@ -25,6 +40,7 @@ export async function handleWebhook(req: Request, env: Env, deps: Deps): Promise
   const event = req.headers.get("X-GitHub-Event");
   if (event === "ping") return new Response("pong");
   if (event === "issue_comment") return handleIssueComment(JSON.parse(body) as IssueCommentEvent, env);
+  if (event === "merge_group") return handleMergeGroup(JSON.parse(body) as MergeGroupEvent, env, deps);
   if (event !== "pull_request") return new Response("ignored", { status: 202 });
 
   const ev = JSON.parse(body) as PullRequestEvent;
@@ -36,6 +52,31 @@ export async function handleWebhook(req: Request, env: Env, deps: Deps): Promise
   // Ack immediately; do the work after the response so GitHub's 10s webhook timeout never bites.
   deps.waitUntil(processPullRequest(ev, env, deps.fetchFn).catch((e) => console.error("judgement-gate failed", e)));
   return new Response("accepted", { status: 202 });
+}
+
+/**
+ * Merge queue: the required check must report on the queue's temporary merge commit or the group waits until it times
+ * out. Every PR in the queue already passed the gate on its own head (that is what let it be enqueued), and the group
+ * commit adds no PR text for Jev to judge, so the check reports `success` without evaluating.
+ */
+function handleMergeGroup(ev: MergeGroupEvent, env: Env, deps: Deps): Response {
+  if (ev.action !== "checks_requested" || !ev.installation) return new Response("ignored", { status: 202 });
+  deps.waitUntil(processMergeGroup(ev, env, deps.fetchFn).catch((e) => console.error("judgement-gate merge group failed", e)));
+  return new Response("accepted", { status: 202 });
+}
+
+export async function processMergeGroup(ev: MergeGroupEvent, env: Env, fetchFn: FetchFn, retryDelaysMs = RETRY_DELAYS_MS): Promise<void> {
+  await withRetry(async () => {
+    const gh = new GitHubClient(await installationToken(env, ev.installation!.id, fetchFn), fetchFn, env.GITHUB_API_URL);
+    await gh.reportCheckRun(
+      ev.repository.owner.login,
+      ev.repository.name,
+      ev.merge_group.head_sha,
+      "success",
+      "[Merge queue] Not re-evaluated",
+      "Each pull request was evaluated at its own head before it was queued. The merge group is not evaluated again.",
+    );
+  }, retryDelaysMs);
 }
 
 /** A human replying `/judgement-gate false-positive <id>` on a PR is logged as feedback. No GitHub calls are made. */
@@ -108,7 +149,12 @@ async function publishRouting(
   }
 }
 
-export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn: FetchFn): Promise<Verdict> {
+/**
+ * Evaluate a pull request and report one `judgement-gate` check run.
+ * Once the check run exists it is always completed: any later failure completes it `neutral` (fail open). If no check
+ * run can be created even after retries, this throws and nothing is reported; see docs/operations.md.
+ */
+export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn: FetchFn, retryDelaysMs = RETRY_DELAYS_MS): Promise<Verdict> {
   const owner = ev.repository.owner.login;
   const repo = ev.repository.name;
   const pr = ev.pull_request.number;
@@ -121,15 +167,21 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
   let routingSetup: RoutingSetup | undefined;
   // Set once routing has been published, so a late failure (e.g. completing the check) never labels twice.
   let routingNote: string | undefined;
-  const token = await installationToken(env, ev.installation!.id, fetchFn);
+  const token = await withRetry(() => installationToken(env, ev.installation!.id, fetchFn), retryDelaysMs);
   const gh = new GitHubClient(token, fetchFn, env.GITHUB_API_URL);
+  // Completing is retried too: a check run left in progress blocks a required check just like a missing one.
+  const complete: GitHubClient["completeCheckRun"] = (...args) => withRetry(() => gh.completeCheckRun(...args), retryDelaysMs);
 
   // Immediate visual feedback in parallel with context fetch.
-  const [check, files] = await Promise.all([gh.createCheckRun(owner, repo, ev.pull_request.head.sha), gh.listFiles(owner, repo, pr)]);
+  const filesPending = gh.listFiles(owner, repo, pr);
+  filesPending.catch(() => {}); // awaited inside the try below; this only stops an unhandled rejection if createCheckRun throws first
+  const check = await withRetry(() => gh.createCheckRun(owner, repo, ev.pull_request.head.sha), retryDelaysMs);
+  let files: ChangedFile[] = [];
 
   let configNote = "";
   const routingTarget: RoutingTarget = { gh, env, owner, repo, pr, routingMode };
   try {
+    files = await filesPending;
     const ctx = assembleContext(ev, files);
     const { judgements: all, routing: setup, note } = await loadGateConfig(gh, owner, env);
     routingSetup = setup;
@@ -203,7 +255,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
       return `- ${r.verdict.conclusion === "success" ? "pass" : "FAIL"}: ${r.judgement.name} (${shown})`;
     });
     const detail = lines.length > 0 ? `${verdict.summary}\n\n${lines.join("\n")}` : verdict.summary;
-    await gh.completeCheckRun(
+    await complete(
       owner,
       repo,
       check.id,
@@ -230,15 +282,21 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
       const fallbackSetup: RoutingSetup = routingSetup ?? { status: "unavailable", message: "audit degraded", label: DEFAULT_LABEL };
       routingNote = asNote((await publishRouting(fallbackSetup, null, files, routingTarget)).text);
     }
-    // Fail open: never block hotfixes on an audit outage (Jev timeout, 5xx, malformed answer).
-    await gh.completeCheckRun(
-      owner,
-      repo,
-      check.id,
-      "neutral",
-      "[Audit Degraded]",
-      `Evaluation unavailable: ${(e as Error).message}${routingNote}${configNote}`,
-    );
+    // Fail open: never block hotfixes on an audit outage (Jev timeout, 5xx, malformed answer), or on any other error
+    // after the check run was created, such as failing to list the files.
+    try {
+      await complete(
+        owner,
+        repo,
+        check.id,
+        "neutral",
+        "[Audit Degraded]",
+        `Evaluation unavailable: ${(e as Error).message}${routingNote}${configNote}`,
+      );
+    } catch (completeError) {
+      // GitHub is unreachable even after retries; the check run stays in progress until the next event for this PR.
+      console.error("judgement-gate could not complete the check run", completeError);
+    }
     return { conclusion: "neutral", reason: "degraded", summary: "[Audit Degraded]" };
   }
 }
