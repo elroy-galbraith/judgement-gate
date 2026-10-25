@@ -1,3 +1,4 @@
+import { hasNewFile } from "./glob";
 import type { ChangedFile, JevResult, Verdict } from "./types";
 
 export interface PolicyOptions {
@@ -6,8 +7,9 @@ export interface PolicyOptions {
 
 const ADR = /^docs\/decisions\/.+\.md$/;
 
+/** An ADR counts only if this PR adds it: editing an old ADR does not verify an unrelated change. */
 export function hasAdr(files: ChangedFile[]): boolean {
-  return files.some((f) => ADR.test(f.filename) && f.status !== "removed");
+  return hasNewFile(files, (name) => ADR.test(name));
 }
 
 export function evaluatePolicy(j: JevResult, files: ChangedFile[], opts: PolicyOptions): Verdict {

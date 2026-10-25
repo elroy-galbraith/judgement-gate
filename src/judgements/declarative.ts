@@ -1,4 +1,4 @@
-import { matchesGlob } from "../glob";
+import { hasNewFile, matchesGlob } from "../glob";
 import type { Judgement, PrContext } from "../types";
 
 export type SatisfiedBy = { pr_body_matches: RegExp } | { file_added: string };
@@ -23,7 +23,7 @@ function satisfied(rules: SatisfiedBy[], pr: PrContext): boolean {
   return rules.some((r) =>
     "pr_body_matches" in r
       ? r.pr_body_matches.test(pr.body)
-      : pr.files.some((f) => f.status !== "removed" && matchesGlob(r.file_added, f.filename)),
+      : hasNewFile(pr.files, (name) => matchesGlob(r.file_added, name)),
   );
 }
 

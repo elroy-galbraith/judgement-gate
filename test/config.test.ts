@@ -97,6 +97,20 @@ describe("declarative decide", () => {
     expect(api().decide(q(0.9), pr("nope", added)).conclusion).toBe("success");
     expect(api().decide(q(0.9), pr("nope", removed)).conclusion).toBe("failure");
   });
+  it("file_added is not satisfied by a modified file (issue #24)", () => {
+    const modified = [{ filename: "docs/api-changes/a.md", status: "modified" }];
+    expect(api().decide(q(0.9), pr("nope", modified)).conclusion).toBe("failure");
+  });
+  it("file_added is satisfied by a file renamed into the glob, not within it", () => {
+    const into = [{ filename: "docs/api-changes/a.md", status: "renamed", previous_filename: "notes/a.md" }];
+    const within = [{ filename: "docs/api-changes/a.md", status: "renamed", previous_filename: "docs/api-changes/b.md" }];
+    expect(api().decide(q(0.9), pr("nope", into)).conclusion).toBe("success");
+    expect(api().decide(q(0.9), pr("nope", within)).conclusion).toBe("failure");
+  });
+  it("file_added is satisfied by a copied file", () => {
+    const copied = [{ filename: "docs/api-changes/a.md", status: "copied" }];
+    expect(api().decide(q(0.9), pr("nope", copied)).conclusion).toBe("success");
+  });
   it("remedy returns the YAML why and fix", () => {
     const j = api();
     const r = j.remedy(j.decide(q(0.9), pr("nope")), { owner: "o", repo: "r", headRef: "abc" });
