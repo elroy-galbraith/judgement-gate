@@ -40,3 +40,15 @@ export function appliesToFiles(appliesTo: string[] | undefined, files: ChangedFi
   if (!appliesTo || appliesTo.length === 0) return true;
   return files.some((f) => appliesTo.some((g) => matchesGlob(g, f.filename)));
 }
+
+/**
+ * True when the PR brings a file matching `matches` into existence: added, copied, or renamed from outside the match.
+ * Modifying an existing file does not count, and neither does renaming within the match (that edits an old file).
+ */
+export function hasNewFile(files: ChangedFile[], matches: (filename: string) => boolean): boolean {
+  return files.some((f) => {
+    if (!matches(f.filename)) return false;
+    if (f.status === "added" || f.status === "copied") return true;
+    return f.status === "renamed" && !(f.previous_filename && matches(f.previous_filename));
+  });
+}

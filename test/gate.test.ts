@@ -28,6 +28,21 @@ describe("policy", () => {
     const v = evaluatePolicy(j({ oneWayProb: 0.9 }), [{ filename: "docs/decisions/0001-x.md", status: "removed" }], opts);
     expect(v.conclusion).toBe("failure");
   });
+  it("modifying an existing ADR does not count (issue #5)", () => {
+    const v = evaluatePolicy(j({ oneWayProb: 0.9 }), [{ filename: "docs/decisions/0001-x.md", status: "modified" }], opts);
+    expect(v.reason).toBe("type1_no_adr");
+  });
+  it("an ADR renamed into docs/decisions counts", () => {
+    const f = [{ filename: "docs/decisions/0002-y.md", status: "renamed", previous_filename: "notes/y.md" }];
+    expect(evaluatePolicy(j({ oneWayProb: 0.9 }), f, opts).reason).toBe("type1_adr");
+  });
+  it("renaming an ADR within docs/decisions does not count", () => {
+    const f = [{ filename: "docs/decisions/0002-y.md", status: "renamed", previous_filename: "docs/decisions/0001-y.md" }];
+    expect(evaluatePolicy(j({ oneWayProb: 0.9 }), f, opts).reason).toBe("type1_no_adr");
+  });
+  it("a copied ADR counts as a new file", () => {
+    expect(evaluatePolicy(j({ oneWayProb: 0.9 }), [{ filename: "docs/decisions/0002-y.md", status: "copied" }], opts).reason).toBe("type1_adr");
+  });
   it("ADR outside docs/decisions does not count", () => {
     expect(evaluatePolicy(j({ oneWayProb: 0.9 }), [{ filename: "docs/other/x.md", status: "added" }], opts).conclusion).toBe("failure");
   });

@@ -52,6 +52,8 @@ export interface IssueCommentEvent {
 export interface ChangedFile {
   filename: string;
   status: string;
+  /** Set by GitHub when status is "renamed" or "copied". */
+  previous_filename?: string;
   patch?: string;
 }
 

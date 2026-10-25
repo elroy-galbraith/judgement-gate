@@ -23,7 +23,7 @@ judgements:
       - pr_body_matches: "(?i)^Migration Plan:"
       - file_added: "docs/api-changes/*.md"
     why: "Consumers cannot roll back with us. Breaking changes need a migration plan."
-    fix: "Add a 'Migration Plan:' line to the PR description, or a note under docs/api-changes/."
+    fix: "Add a 'Migration Plan:' line to the PR description, or a new note under docs/api-changes/."
     probes:                              # optional: up to 7 short questions a reviewer will ask
       - "Which consumers call the changed endpoint or field, and how do you know?"
       - "What do they see during the rollout window, with old and new versions side by side?"

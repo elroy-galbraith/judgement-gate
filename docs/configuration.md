@@ -13,7 +13,7 @@ A judgement is what the gate asks about a change. The Worker sends every applica
 | `question`, `true`, `false` | The yes/no question for Jev, and what each answer means. |
 | `threshold` | 0 to 1. Flagged when the probability of "true" is at least this. |
 | `applies_to` | Optional globs (`*`, `**`, `?`). Judged only if a changed file matches. Omit for always. |
-| `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars) or `file_added` (glob on an added or modified file). |
+| `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars) or `file_added` (glob on a file the PR adds; modifying an existing file does not count, and a file renamed in from outside the glob does). |
 | `why`, `fix` | The remedy shown to the author: why it matters, and what to do. |
 | `probes` | Optional. Short questions shown to the author as "Questions a reviewer will ask". On a declarative judgement: a list of questions. On `use: one-way-door`: a mapping with `type1` and/or `type2`, each a list of questions. At most 7 questions per list, each at most 300 characters. Static text; no model call. |
 

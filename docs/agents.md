@@ -28,7 +28,7 @@ One line, an HTML comment (invisible when rendered). Find it with `/<!-- judgeme
 
 - `pr_body_matches`: `regex` (and optional `flags`). The PR body must match it.
 - `pr_body_fields`: `fields` that must appear as `Name:` lines in the PR body; `template` shows the format.
-- `file_added`: add or modify a file matching `glob` (`example_path` is a concrete choice).
+- `file_added`: add a new file matching `glob` (`example_path` is a concrete choice). Editing an existing file does not satisfy it; a file renamed in from outside the glob does.
 
 Built-in `one-way-door`: `type1_no_adr` → `file_added` `docs/decisions/*.md`; `type2_no_plan` → `pr_body_fields` `Reversal Trigger` and `Rollback Path` (plus `Owner`); `ambiguous` → either of the two.
 

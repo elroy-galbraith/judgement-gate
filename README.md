@@ -10,7 +10,7 @@ It runs as a Cloudflare Worker (free tier). A GitHub App sends `pull_request` we
 
 ## Judgements
 
-A judgement is a named question, a threshold, a way for the author to clear it, and a remedy. One is built in, `one-way-door`: Type 1 (one-way) changes need an ADR in `docs/decisions/*.md`; Type 2 (reversible) changes need a Reversal Trigger and Rollback Path in the PR body. Add your own in YAML:
+A judgement is a named question, a threshold, a way for the author to clear it, and a remedy. One is built in, `one-way-door`: Type 1 (one-way) changes need a new ADR in `docs/decisions/*.md` (added by the PR; editing an old one does not count); Type 2 (reversible) changes need a Reversal Trigger and Rollback Path in the PR body. Add your own in YAML:
 
 ```yaml
 judgements:
