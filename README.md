@@ -1,6 +1,9 @@
-# judgement-gate
-
-**Codify your team's judgement and apply it to every pull request.**
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.svg">
+    <img src="assets/hero-light.svg" alt="judgement-gate: codify your team's judgement and apply it to every pull request" width="100%">
+  </picture>
+</h1>
 
 Agentic coding writes code faster than people can build the judgement to review it. Judgement (is this reversible? does this break a consumer?) is hard to teach and hard to automate. Linters can't check it, because it depends on business logic and intent. Models like TypeSafe's Jev can answer these questions, so you can write the judgement down once and apply it to every PR, whether a person or an agent wrote it.
 

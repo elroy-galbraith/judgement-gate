@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" width="1000" height="320" role="img" aria-labelledby="t d" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+  <title id="t">judgement-gate</title>
+  <desc id="d">Codify your team's judgement and apply it to every pull request. Agents fix their own PRs, juniors learn why it matters, seniors review what counts.</desc>
+  <rect x="2" y="2" width="996" height="316" rx="18" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+  <g transform="translate(440,24) scale(.95)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 84V56a36 36 0 0 1 72 0v28a12 12 0 0 1-12 12H44L26 112V96Q24 96 24 84Z" fill="#818cf8" stroke="#818cf8" stroke-width="4"/>
+    <path d="M42 68l13 13 24-28" stroke="#161b22" stroke-width="10"/>
+  </g>
+  <text x="500" y="186" font-family="ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace" font-size="44" font-weight="700" text-anchor="middle" fill="#e0e7ff">judgement-gate</text>
+  <text x="500" y="222" font-size="20" text-anchor="middle" fill="#9ca3af">Codify your team's judgement and apply it to every pull request.</text>
+  <g font-size="14" text-anchor="middle" fill="#c7d2fe">
+    <rect x="100" y="250" width="240" height="38" rx="19" fill="#1e1b4b" stroke="#3730a3"/>
+    <text x="220" y="274">Agents fix their own PRs</text>
+    <rect x="380" y="250" width="240" height="38" rx="19" fill="#1e1b4b" stroke="#3730a3"/>
+    <text x="500" y="274">Juniors learn why it matters</text>
+    <rect x="660" y="250" width="240" height="38" rx="19" fill="#1e1b4b" stroke="#3730a3"/>
+    <text x="780" y="274">Seniors review what counts</text>
+  </g>
+</svg>
