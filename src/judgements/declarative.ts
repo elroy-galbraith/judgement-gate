@@ -17,12 +17,16 @@ export interface DeclarativeSpec {
   probes?: string[];
 }
 
+/** Only this much of the PR body is matched, so a regex has bounded input however long the body is. */
+export const MAX_MATCH_BODY = 10_000;
+
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
 function satisfied(rules: SatisfiedBy[], pr: PrContext): boolean {
+  const body = pr.body.slice(0, MAX_MATCH_BODY);
   return rules.some((r) =>
     "pr_body_matches" in r
-      ? r.pr_body_matches.test(pr.body)
+      ? r.pr_body_matches.test(body)
       : hasNewFile(pr.files, (name) => matchesGlob(r.file_added, name)),
   );
 }

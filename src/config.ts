@@ -55,9 +55,35 @@ function builtinProbes(v: unknown, where: string): OneWayDoorProbes | undefined 
   return { type1: probeList(v.type1, where, "probes.type1"), type2: probeList(v.type2, where, "probes.type2") };
 }
 
+/**
+ * Heuristic for catastrophic backtracking: a group that already contains a repeat (`*`, `+`, `{n,}`, `{n,m}`) and is
+ * itself repeated, such as `(\s*\S+)+` or `((a+)b)*`. It does not catch every slow pattern (overlapping alternation
+ * like `(a|a)*` passes), so the body is also truncated before matching.
+ */
+export function hasNestedQuantifier(pattern: string): boolean {
+  const repeat = (at: number) => /^(?:[*+]|\{\d+,\d*\})/.test(pattern.slice(at));
+  const stack: boolean[] = []; // per open group: does it contain a repeat?
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "\\") i++;
+    else if (c === "[") {
+      for (i++; i < pattern.length && pattern[i] !== "]"; i++) if (pattern[i] === "\\") i++;
+    } else if (c === "(") stack.push(false);
+    else if (c === ")") {
+      const inner = stack.pop() ?? false;
+      if (inner && repeat(i + 1)) return true;
+      if (stack.length > 0 && (inner || repeat(i + 1))) stack[stack.length - 1] = true;
+    } else if (repeat(i) && stack.length > 0) stack[stack.length - 1] = true;
+  }
+  return false;
+}
+
 function bodyRegex(pattern: unknown, where: string): RegExp {
   if (typeof pattern !== "string" || pattern === "") throw new ConfigError(`${where}: pr_body_matches must be a non-empty string`);
   if (pattern.length > MAX_REGEX) throw new ConfigError(`${where}: pr_body_matches is longer than ${MAX_REGEX} characters`);
+  if (hasNestedQuantifier(pattern)) {
+    throw new ConfigError(`${where}: pr_body_matches repeats a group that itself contains a repeat, which can take exponential time on a crafted PR body (simplify the pattern)`);
+  }
   const ci = pattern.startsWith("(?i)");
   try {
     return new RegExp(ci ? pattern.slice(4) : pattern, ci ? "mi" : "m");

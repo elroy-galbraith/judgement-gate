@@ -83,6 +83,17 @@ export class GitHubClient {
     });
   }
 
+  /** Create a check run that is already completed, so it is never visible as in progress. */
+  reportCheckRun(owner: string, repo: string, headSha: string, conclusion: "success" | "failure" | "neutral", title: string, summary: string) {
+    return this.req("POST", `/repos/${owner}/${repo}/check-runs`, {
+      name: CHECK_NAME,
+      head_sha: headSha,
+      status: "completed",
+      conclusion,
+      output: { title, summary },
+    });
+  }
+
   completeCheckRun(
     owner: string,
     repo: string,

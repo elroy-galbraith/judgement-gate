@@ -41,6 +41,13 @@ export interface PullRequestEvent {
   changes?: { title?: unknown; body?: unknown; base?: unknown };
 }
 
+export interface MergeGroupEvent {
+  action: string;
+  installation?: { id: number };
+  repository: { name: string; owner: { login: string } };
+  merge_group: { head_sha: string; head_ref?: string; base_ref?: string };
+}
+
 export interface IssueCommentEvent {
   action: string;
   installation?: { id: number };

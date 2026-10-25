@@ -482,3 +482,59 @@ describe("loadGateConfig", () => {
     expect(out.routing).toMatchObject({ status: "config_error", label: "ready-for-people" });
   });
 });
+
+describe("pr_body_matches safety (issue #23)", () => {
+  const withPattern = (pattern: string) => decl({ satisfied_by: [{ pr_body_matches: pattern }] });
+
+  it.each([
+    "(?i)^Migration Plan:(\\s*\\S+)+$",
+    "(a+)+$",
+    "(a*)*b",
+    "((a+)b)*",
+    "(?:\w+\s?)+$",
+    "(x{2,})+",
+    "(a|b+)*c",
+  ])("rejects nested quantifier %s at load", (pattern) => {
+    expect(() => parseConfig(withPattern(pattern), defaults)).toThrow(ConfigError);
+    expect(() => parseConfig(withPattern(pattern), defaults)).toThrow(/exponential/);
+  });
+
+  it.each([
+    "(?i)^Migration Plan:",
+    "^Plan: .+$",
+    "(?i)^(Reversal Trigger|Rollback Path):\\s*\\S+",
+    "(foo)?bar+",
+    "(ab){2}c+",
+    "([(a+]+)x",
+    "\\(a+\\)+",
+    "(a?)b",
+  ])("accepts %s", (pattern) => {
+    expect(() => parseConfig(withPattern(pattern), defaults)).not.toThrow();
+  });
+
+  it("a rejected pattern plus a 50,000-character near-matching body never reaches the regex", async () => {
+    const pattern = "(?i)^Migration Plan:(\\s*\\S+)+$";
+    expect(() => parseConfig(withPattern(pattern), defaults)).toThrow(ConfigError);
+    // loadGateConfig falls back to the built-in with a note, so evaluation never compiles the pattern.
+    const gh = { getFileContents: async () => withPattern(pattern) } as unknown as GitHubClient;
+    clearConfigCache();
+    const out = await loadGateConfig(gh, "o", { CONFIDENCE_THRESHOLD: "0.75" } as Env);
+    expect(out.judgements.map((j) => j.id)).toEqual(["one-way-door"]);
+    expect(out.note).toMatch(/Config error: .*exponential.*fell back to built-in judgements/);
+  });
+
+  it("only the first 10,000 characters of the body are matched", () => {
+    const j = parseConfig(decl({ threshold: 0.5, satisfied_by: [{ pr_body_matches: "^Plan:" }] }), defaults)[0];
+    const flagged = (body: string) => j.decide(q(0.9), pr(body)).conclusion;
+    expect(flagged(`Plan: x`)).toBe("success");
+    expect(flagged(`${"x".repeat(9_990)}\nPlan: x`)).toBe("success");
+    expect(flagged(`${"x".repeat(10_000)}\nPlan: x`)).toBe("failure");
+  });
+
+  it("a long body that matches a safe pattern completes quickly", () => {
+    const j = parseConfig(decl({ satisfied_by: [{ pr_body_matches: "(?i)^Plan:\\s*\\S+$" }] }), defaults)[0];
+    const start = Date.now();
+    j.decide(q(0.9), pr(`Plan: ${"a ".repeat(25_000)}!`));
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+});
