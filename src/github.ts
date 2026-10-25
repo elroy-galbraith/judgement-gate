@@ -74,13 +74,41 @@ export class GitHubClient {
     return res.text();
   }
 
-  createCheckRun(owner: string, repo: string, headSha: string) {
+  /**
+   * Put the gate's check on `headSha` in progress: reopen the run this app already made for that
+   * commit, or create one. Edits and redeliveries on one commit then share a single check (issue #3).
+   */
+  async startCheckRun(owner: string, repo: string, headSha: string, appId: string): Promise<{ id: number }> {
+    const output = { title: "Evaluating change", summary: "Classifying blast radius..." };
+    const existing = await this.findCheckRun(owner, repo, headSha, appId);
+    if (existing) {
+      await this.req("PATCH", `/repos/${owner}/${repo}/check-runs/${existing.id}`, { status: "in_progress", output });
+      return existing;
+    }
     return this.req<{ id: number }>("POST", `/repos/${owner}/${repo}/check-runs`, {
       name: CHECK_NAME,
       head_sha: headSha,
       status: "in_progress",
-      output: { title: "Evaluating change", summary: "Classifying blast radius..." },
+      output,
     });
+  }
+
+  /**
+   * The newest gate check run on this commit that belongs to this app, or null. A failed lookup also
+   * yields null: a duplicate check is better than no check, because the check can be required.
+   */
+  private async findCheckRun(owner: string, repo: string, headSha: string, appId: string): Promise<{ id: number } | null> {
+    try {
+      const { check_runs } = await this.req<{ check_runs: { id: number; app?: { id?: number; client_id?: string } | null }[] }>(
+        "GET",
+        `/repos/${owner}/${repo}/commits/${headSha}/check-runs?check_name=${encodeURIComponent(CHECK_NAME)}&filter=latest`,
+      );
+      // The app id in config may be the numeric id or the client id; GitHub reports both on the run.
+      const ours = check_runs.filter((r) => String(r.app?.id) === appId || r.app?.client_id === appId);
+      return ours.sort((a, b) => b.id - a.id)[0] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Create a check run that is already completed, so it is never visible as in progress. */

@@ -43,6 +43,11 @@ const server = http.createServer(async (req, res) => {
     return send({});
   }
   if (req.method === "POST" && /\/access_tokens$/.test(url.pathname)) return send({ token: "mock-token" }, 201);
+  if (req.method === "GET" && (m = url.pathname.match(/\/commits\/([^/]+)\/check-runs$/))) {
+    const name = url.searchParams.get("check_name");
+    const runs = [...checks.values()].filter((c) => c.head_sha === m[1] && (!name || c.name === name));
+    return send({ total_count: runs.length, check_runs: runs.map((c) => ({ ...c, app: { id: Number(process.env.GITHUB_APP_ID ?? 1) } })) });
+  }
   if (req.method === "POST" && /\/check-runs$/.test(url.pathname)) {
     log(`CHECK  in_progress  ${body.name} @ ${body.head_sha.slice(0, 7)}`);
     const id = nextId++;
@@ -51,6 +56,12 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "PATCH" && /\/check-runs\/\d+$/.test(url.pathname)) {
     const check = checks.get(Number(url.pathname.split("/").pop()));
+    if (body.status === "in_progress") {
+      // A reopened run: the gate is evaluating this commit again.
+      if (check) Object.assign(check, { status: "in_progress", conclusion: undefined });
+      log(`CHECK  in_progress  (reopened)`);
+      return send({});
+    }
     if (check) Object.assign(check, { status: "completed", conclusion: body.conclusion, title: body.output.title, summary: body.output.summary ?? "" });
     log(`CHECK  ${body.conclusion.toUpperCase().padEnd(8)} ${body.output.title}`);
     for (const line of (body.output.summary ?? "").split("\n").filter(Boolean)) console.log("         | " + line);
