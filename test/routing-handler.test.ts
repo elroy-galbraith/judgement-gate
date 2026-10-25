@@ -204,12 +204,13 @@ routing:
   it("a failure after routing is published does not label twice", async () => {
     // A config_error routes to human on both the normal and the degraded path, so a re-publish would label again.
     const net = fakeNet({ config: { status: 200, body: "routing:\n  human-when: []\n" }, answers: benign });
+    // Completing is retried, so the verdict has to fail all three attempts before the degraded path runs.
     let patches = 0;
     const fetchFn = ((input: any, init: any = {}) =>
-      init.method === "PATCH" && String(input).includes("/check-runs/55") && patches++ === 0
+      init.method === "PATCH" && String(input).includes("/check-runs/55") && patches++ < 3
         ? Promise.resolve(new Response("boom", { status: 502 }))
         : net.fetchFn(input, init)) as typeof fetch;
-    await processPullRequest(prEvent(), await makeEnv(), fetchFn);
+    await processPullRequest(prEvent(), await makeEnv(), fetchFn, [0, 0]);
     expect(labelCalls(net.calls)).toHaveLength(1);
     expect(finalCheck(net.calls).conclusion).toBe("neutral");
     expect(finalCheck(net.calls).output.summary).toContain("Review routing: human (config error");

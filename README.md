@@ -90,7 +90,7 @@ The mock logs `LABEL added on #n: ...` when the gate labels a PR (scenarios 1 an
 
 ## Deploy for real
 
-1. Create a GitHub App: webhook URL `https://<worker>.workers.dev/webhook`, a webhook secret, permissions **Checks: read & write**, **Pull requests: read**, **Issues: read & write** (comments and the review-routing label), **Contents: read** (to read the org judgement config), subscribe to **Pull request** and **Issue comment** (the second lets people reply `/judgement-gate false-positive <id>` to a flag; no new permission needed, and without it only the false-positive log is lost). Install it on the org or a test repo, including the org's `.github` repo if you use org-level judgements.
+1. Create a GitHub App: webhook URL `https://<worker>.workers.dev/webhook`, a webhook secret, permissions **Checks: read & write**, **Pull requests: read**, **Issues: read & write** (comments and the review-routing label), **Contents: read** (to read the org judgement config), subscribe to **Pull request** and **Issue comment** (the second lets people reply `/judgement-gate false-positive <id>` to a flag; no new permission needed, and without it only the false-positive log is lost). If any repo uses a merge queue, also subscribe to **Merge group**; without it a required `judgement-gate` check never reports on the queue's merge commit and the queue stalls (see [docs/operations.md](docs/operations.md#merge-queue)). Install it on the org or a test repo, including the org's `.github` repo if you use org-level judgements.
 2. Convert the downloaded key to PKCS#8 (Web Crypto cannot import the PKCS#1 key GitHub gives you):
    `openssl pkcs8 -topk8 -nocrypt -in app.pem -out app-pkcs8.pem`
 3. Set secrets, then deploy:
@@ -106,8 +106,10 @@ The mock logs `LABEL added on #n: ...` when the gate labels a PR (scenarios 1 an
 
 1. **Shadow on a few repos (2 weeks).** `MODE = "shadow"` is the default: the check always passes. Pick repos with real migrations, infra changes and agent-authored PRs.
 2. **Review the flags with the team.** Would we have caught this? Was the flag wrong? Use the answers to tune thresholds.
-3. **Enforce on one willing repo.** Set `MODE = "enforce"` and add an organisation ruleset that requires `judgement-gate`.
+3. **Make the check required, still in shadow mode.** Add an organisation ruleset that requires `judgement-gate` on one willing repo while `MODE = "shadow"`. Every PR passes, so this only proves the check always reports. Then set `MODE = "enforce"`.
 4. **Add judgements** each time review catches something the gate missed.
+
+Making the check required is the risky step: a required check that never reports blocks merges. The gate completes its check run even when evaluation fails (a `neutral` `[Audit Degraded]`, so it fails open), ignores draft PRs, and answers merge queue runs without re-evaluating. The one case it cannot cover is when GitHub will not even create the check run. [docs/operations.md](docs/operations.md#rolling-out-the-required-check-safely) lists these decisions, the ruleset settings to use, and how to back out.
 
 More in [docs/operations.md](docs/operations.md).
 

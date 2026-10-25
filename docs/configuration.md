@@ -146,4 +146,9 @@ At most one extra GitHub request per isolate per 60 seconds. The Worker caches t
 
 ## Regex caution
 
-`pr_body_matches` patterns run against PR bodies written by anyone. Keep them simple: a pattern with nested repeats can run for a very long time on a crafted body, which can stop the Worker mid-run and leave the check stuck at "in progress".
+`pr_body_matches` patterns run against PR bodies written by anyone, so two guards apply:
+
+- Only the first 10,000 characters of the PR body are matched. Put the section a pattern looks for near the top of the description. This bounds patterns that are slow in a polynomial way; it does not bound exponential ones, which never finish on 10,000 characters.
+- A pattern that repeats a group which itself contains a repeat, such as `(\s*\S+)+$` or `(a|b+)*`, is rejected when the config loads. The gate then falls back to the built-in judgement and says so in the check summary ("Config error: ..."). The test is a heuristic: it rejects some safe patterns (`(\d+\.)+`) and misses overlapping alternation such as `(a|a)*`, which is exponential and is not helped by the 10,000-character cap. The protection against those is the rejection above plus keeping patterns simple, for example `(?i)^Migration Plan:`.
+
+Without the guards, a crafted body could make the regex run past the Worker's CPU limit. The Worker is then killed without being able to finish the check, which stays "in progress" and blocks a required check (see [operations.md](operations.md#when-the-check-cannot-be-completed)).
