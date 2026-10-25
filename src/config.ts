@@ -58,7 +58,7 @@ function builtinProbes(v: unknown, where: string): OneWayDoorProbes | undefined 
 /**
  * Heuristic for catastrophic backtracking: a group that already contains a repeat (`*`, `+`, `{n,}`, `{n,m}`) and is
  * itself repeated, such as `(\s*\S+)+` or `((a+)b)*`. It does not catch every slow pattern (overlapping alternation
- * like `(a|a)*` passes), so the body is also truncated before matching.
+ * like `(a|a)*` passes, and it can still take exponential time). The body cap only bounds polynomial patterns.
  */
 export function hasNestedQuantifier(pattern: string): boolean {
   const repeat = (at: number) => /^(?:[*+]|\{\d+,\d*\})/.test(pattern.slice(at));

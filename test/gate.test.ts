@@ -431,9 +431,14 @@ describe("required check is never left missing or in progress (issue #14)", () =
     clearInstallationTokenCache();
     const env = await makeEnv();
     const net = fakeNet(answer);
-    const fetchFn = failing(net, createsCheck);
+    let attempts = 0;
+    const down = failing(net, createsCheck);
+    const fetchFn = ((input: any, init: any = {}) => {
+      if (createsCheck(String(input), init.method ?? "GET")) attempts++;
+      return down(input, init);
+    }) as typeof fetch;
     await expect(processPullRequest(prEvent(), env, fetchFn, noWait)).rejects.toThrow(/check-runs/);
-    expect(net.calls.filter((c) => createsCheck(c.url, c.method))).toHaveLength(0);
+    expect(attempts).toBe(3);
     expect(net.calls.some((c) => c.method === "PATCH")).toBe(false);
     expect(net.calls.some((c) => c.url.includes("jev.test"))).toBe(false);
   });
@@ -442,7 +447,14 @@ describe("required check is never left missing or in progress (issue #14)", () =
     clearInstallationTokenCache();
     const env = await makeEnv();
     const net = fakeNet(answer);
-    await expect(processPullRequest(prEvent(), env, failing(net, (u) => u.endsWith("/access_tokens")), noWait)).rejects.toThrow(/installation token/);
+    let attempts = 0;
+    const down = failing(net, (u) => u.endsWith("/access_tokens"));
+    const fetchFn = ((input: any, init: any = {}) => {
+      if (String(input).endsWith("/access_tokens")) attempts++;
+      return down(input, init);
+    }) as typeof fetch;
+    await expect(processPullRequest(prEvent(), env, fetchFn, noWait)).rejects.toThrow(/installation token/);
+    expect(attempts).toBe(3);
     expect(net.calls).toHaveLength(0);
   });
 

@@ -491,7 +491,7 @@ describe("pr_body_matches safety (issue #23)", () => {
     "(a+)+$",
     "(a*)*b",
     "((a+)b)*",
-    "(?:\w+\s?)+$",
+    "(?:\\w+\\s?)+$",
     "(x{2,})+",
     "(a|b+)*c",
   ])("rejects nested quantifier %s at load", (pattern) => {
