@@ -1,4 +1,6 @@
+import { globMatcher } from "../glob";
 import { evaluatePolicy } from "../policy";
+import { isSafePath } from "../safe-paths";
 import type { Judgement, JevAnswers, JevResult, JudgementVerdict } from "../types";
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -54,6 +56,8 @@ export const DEFAULT_PROBES: { type1: string[]; type2: string[] } = {
 export interface OneWayDoorOptions {
   confidenceThreshold?: number;
   appliesTo?: string[];
+  /** Replaces the default safe set (`isSafePath`). An empty list ignores nothing, so every PR is judged. */
+  ignore?: string[];
   probes?: OneWayDoorProbes;
 }
 
@@ -64,6 +68,7 @@ export function oneWayDoor(opts: OneWayDoorOptions = {}): Judgement {
     id: "one-way-door",
     name: "One-way door",
     appliesTo: opts.appliesTo,
+    ignores: opts.ignore === undefined ? isSafePath : opts.ignore.length > 0 ? globMatcher(opts.ignore) : undefined,
     unprefixedKeys: true,
     reasons: ["type1_adr", "type1_no_adr", "ambiguous", "type2_ok", "type2_no_plan"],
     questions: {

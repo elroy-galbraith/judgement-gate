@@ -33,6 +33,8 @@ judgements:
 
 A judgement can also carry `probes`, short questions a reviewer will ask, shown in the comment and the agent block; the built-in `one-way-door` ships defaults you can override.
 
+A PR that only touches docs, images or lockfiles skips the built-in `one-way-door` with no model call, and bot-authored PRs are judged like any other; `ignore:` changes this per judgement. See [Safe paths and `ignore`](docs/configuration.md#safe-paths-and-ignore).
+
 Full reference: [docs/configuration.md](docs/configuration.md).
 
 ## Severity

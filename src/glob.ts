@@ -35,10 +35,26 @@ export function matchesGlob(pattern: string, filename: string): boolean {
   return toRegExp(pattern).test(filename);
 }
 
-/** A judgement applies when it has no globs, or any changed file matches any glob. */
-export function appliesToFiles(appliesTo: string[] | undefined, files: ChangedFile[]): boolean {
-  if (!appliesTo || appliesTo.length === 0) return true;
-  return files.some((f) => appliesTo.some((g) => matchesGlob(g, f.filename)));
+/** True when a filename matches any of the globs. An empty list matches nothing. */
+export function globMatcher(globs: string[]): (filename: string) => boolean {
+  return (filename) => globs.some((g) => matchesGlob(g, filename));
+}
+
+/**
+ * A judgement applies when some changed file is not ignored and, if it has `appliesTo` globs, matches one of them.
+ * With no globs and no ignore it always applies, even to a PR with no changed files.
+ * A renamed file counts as ignored only when both its old and new names are, so a move cannot hide a risky file.
+ */
+export function appliesToFiles(
+  appliesTo: string[] | undefined,
+  files: ChangedFile[],
+  ignores?: (filename: string) => boolean,
+): boolean {
+  const live = ignores
+    ? files.filter((f) => !(ignores(f.filename) && (f.previous_filename === undefined || ignores(f.previous_filename))))
+    : files;
+  if (!appliesTo || appliesTo.length === 0) return live.length > 0 || files.length === 0;
+  return live.some((f) => appliesTo.some((g) => matchesGlob(g, f.filename)));
 }
 
 /**

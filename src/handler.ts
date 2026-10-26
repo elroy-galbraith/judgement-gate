@@ -3,7 +3,7 @@ import { aggregate, type JudgementResult } from "./aggregate";
 import { loadGateConfig } from "./config";
 import { renderComment, renderRoutingComment } from "./comment";
 import { verifySignature } from "./crypto";
-import { assembleContext, GitHubClient, installationToken } from "./github";
+import { assembleContext, GitHubClient, installationToken, LIST_FILES_LIMIT } from "./github";
 import { evaluate } from "./jev";
 import { appliesToFiles } from "./glob";
 import { DEFAULT_LABEL, evaluateRouting, type RoutingResult, type RoutingSetup } from "./routing";
@@ -186,7 +186,9 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     const { judgements: all, routing: setup, note } = await loadGateConfig(gh, owner, env);
     routingSetup = setup;
     if (note) configNote = `\n\n_${note}_`;
-    const applicable = all.filter((j) => appliesToFiles(j.appliesTo, files));
+    // A list that hit the limit may be cut off, and the files past the cut could be risky, so nothing is ignored then.
+    const listComplete = files.length < LIST_FILES_LIMIT;
+    const applicable = all.filter((j) => appliesToFiles(j.appliesTo, files, listComplete ? j.ignores : undefined));
     evaluated = applicable;
 
     let results: JudgementResult[] = [];

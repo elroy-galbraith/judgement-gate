@@ -1,4 +1,4 @@
-import { hasNewFile, matchesGlob } from "../glob";
+import { globMatcher, hasNewFile, matchesGlob } from "../glob";
 import type { JevAnswers, JevQuestion, Judgement, PrContext } from "../types";
 
 /**
@@ -15,6 +15,7 @@ export interface DeclarativeSpec {
   whenFalse: string;
   threshold: number;
   appliesTo?: string[];
+  ignore?: string[];
   satisfiedBy: SatisfiedBy[];
   why: string;
   fix: string;
@@ -72,6 +73,7 @@ export function compileDeclarative(spec: DeclarativeSpec): Judgement {
     id: spec.id,
     name: spec.name,
     appliesTo: spec.appliesTo,
+    ignores: spec.ignore && spec.ignore.length > 0 ? globMatcher(spec.ignore) : undefined,
     reasons: [`${spec.id}_unsatisfied`, `${spec.id}_ok`],
     questions: {
       q: { type: "noul", instructions: spec.question, criteria: { true: spec.whenTrue, false: spec.whenFalse } },

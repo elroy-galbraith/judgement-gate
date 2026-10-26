@@ -3,6 +3,10 @@ import type { ChangedFile, Env, FetchFn, PrContext, PullRequestEvent } from "./t
 
 export const CHECK_NAME = "judgement-gate";
 export const COMMENT_MARKER = "<!-- judgement-gate -->";
+const LIST_FILES_PAGE_SIZE = 100;
+const LIST_FILES_PAGES = 10;
+/** `listFiles` stops here. A list this long may be cut off, so what it leaves out is unknown. */
+export const LIST_FILES_LIMIT = LIST_FILES_PAGE_SIZE * LIST_FILES_PAGES;
 const PATCH_BUDGET = 50 * 1024;
 
 // Highest priority first: migrations, config, manifests, core models.
@@ -139,10 +143,10 @@ export class GitHubClient {
 
   async listFiles(owner: string, repo: string, pr: number): Promise<ChangedFile[]> {
     const all: ChangedFile[] = [];
-    for (let page = 1; page <= 10; page++) {
-      const batch = await this.req<ChangedFile[]>("GET", `/repos/${owner}/${repo}/pulls/${pr}/files?per_page=100&page=${page}`);
+    for (let page = 1; page <= LIST_FILES_PAGES; page++) {
+      const batch = await this.req<ChangedFile[]>("GET", `/repos/${owner}/${repo}/pulls/${pr}/files?per_page=${LIST_FILES_PAGE_SIZE}&page=${page}`);
       all.push(...batch);
-      if (batch.length < 100) break;
+      if (batch.length < LIST_FILES_PAGE_SIZE) break;
     }
     return all;
   }
