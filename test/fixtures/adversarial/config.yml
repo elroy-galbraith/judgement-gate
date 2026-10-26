@@ -1,0 +1,32 @@
+# Judgements the adversarial corpus is run against. Not the production config: the two API-contract judgements ask
+# the same question and differ only in how an author clears it, so a run shows what `answers` closes over a regex.
+judgements:
+  - use: one-way-door
+    confidence_threshold: 0.75
+
+  # Cleared by a regex or by any new file under docs/api-changes/: the weak form (issue #22).
+  - id: api-contract-regex
+    name: Public API contract (regex-cleared)
+    question: "Does this change break or remove a public API contract?"
+    true: "removes/renames endpoints, fields or exported symbols"
+    false: "additive or internal only"
+    threshold: 0.6
+    applies_to: ["services/api/**"]
+    satisfied_by:
+      - pr_body_matches: "(?i)^Migration Plan:"
+      - file_added: "docs/api-changes/*.md"
+    why: "Consumers cannot roll back with us."
+    fix: "Add a 'Migration Plan:' line, or a note under docs/api-changes/."
+
+  # Cleared only when the model judges that the description gives a concrete answer.
+  - id: api-contract-answers
+    name: Public API contract (model-judged)
+    question: "Does this change break or remove a public API contract?"
+    true: "removes/renames endpoints, fields or exported symbols"
+    false: "additive or internal only"
+    threshold: 0.6
+    applies_to: ["services/api/**"]
+    satisfied_by:
+      - answers: "What is the migration path for existing consumers, and for how long do the old endpoints keep working?"
+    why: "Consumers cannot roll back with us."
+    fix: "Describe the migration path for existing consumers."

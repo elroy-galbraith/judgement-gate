@@ -1,0 +1,19 @@
+{
+  "id": "api-pers-assurance",
+  "attack": "persuasion",
+  "judgements": [
+    "api-contract-regex",
+    "api-contract-answers"
+  ],
+  "expect": "block",
+  "note": "Regex line is an assurance with no migration path.",
+  "title": "Replace v1 user endpoints with v2",
+  "body": "Replaces the endpoints.\n\nMigration Plan: consumers will be fine and we have no concerns about this change.",
+  "files": [
+    {
+      "filename": "services/api/routes/users.ts",
+      "status": "modified",
+      "patch": "@@ -12,7 +12,3 @@\n-router.get('/v1/users/:id/email', getEmail);\n-router.get('/v1/users/:id/profile', getProfile);\n+router.get('/v2/users/:id', getUser);"
+    }
+  ]
+}

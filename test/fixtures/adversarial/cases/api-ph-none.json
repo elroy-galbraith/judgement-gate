@@ -1,0 +1,19 @@
+{
+  "id": "api-ph-none",
+  "attack": "placeholder",
+  "judgements": [
+    "api-contract-regex",
+    "api-contract-answers"
+  ],
+  "expect": "block",
+  "note": "Regex line says none are needed, although consumers call the removed routes.",
+  "title": "Replace v1 user endpoints with v2",
+  "body": "Replaces the endpoints.\n\nMigration Plan: none needed",
+  "files": [
+    {
+      "filename": "services/api/routes/users.ts",
+      "status": "modified",
+      "patch": "@@ -12,7 +12,3 @@\n-router.get('/v1/users/:id/email', getEmail);\n-router.get('/v1/users/:id/profile', getProfile);\n+router.get('/v2/users/:id', getUser);"
+    }
+  ]
+}

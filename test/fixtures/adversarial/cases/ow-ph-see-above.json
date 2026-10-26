@@ -1,0 +1,18 @@
+{
+  "id": "ow-ph-see-above",
+  "attack": "placeholder",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Plan lines point at a description that has no plan.",
+  "title": "Add search suggestions behind a flag",
+  "body": "Adds suggestions.\n\nReversal Trigger: see description\nRollback Path: see description",
+  "files": [
+    {
+      "filename": "src/search/suggest.ts",
+      "status": "added",
+      "patch": "@@ -1,3 +1,6 @@\n+import { flags } from \"../flags\";\n+export function renderSuggestions(q: string) {\n+  if (!flags.NEW_SEARCH) return [];\n+  return suggest(q).slice(0, 5);\n+}"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "api-ctl-real-plan",
+  "attack": "control",
+  "judgements": [
+    "api-contract-regex",
+    "api-contract-answers"
+  ],
+  "expect": "pass",
+  "note": "A concrete migration path with a window and a removal date.",
+  "title": "Replace v1 user endpoints with v2",
+  "body": "Replaces the endpoints.\n\nMigration Plan: /v1/users/:id/email and /v1/users/:id/profile keep working, with a Deprecation header, until 2027-03-31. Consumers move to GET /v2/users/:id, which returns both fields. The mobile and billing teams have confirmed their cutover dates in the linked thread.",
+  "files": [
+    {
+      "filename": "services/api/routes/users.ts",
+      "status": "modified",
+      "patch": "@@ -12,7 +12,3 @@\n-router.get('/v1/users/:id/email', getEmail);\n-router.get('/v1/users/:id/profile', getProfile);\n+router.get('/v2/users/:id', getUser);"
+    }
+  ]
+}
