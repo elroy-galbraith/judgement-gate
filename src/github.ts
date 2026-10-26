@@ -23,18 +23,62 @@ function rank(name: string): number {
   return i === -1 ? PRIORITY.length : i;
 }
 
-export function buildPatchExtract(files: ChangedFile[], budget = PATCH_BUDGET): string {
-  let out = "";
-  for (const f of [...files].sort((a, b) => rank(a.filename) - rank(b.filename))) {
-    if (!f.patch) continue;
-    const chunk = `--- ${f.filename} (${f.status})\n${f.patch}\n`;
-    if (out.length + chunk.length > budget) {
-      out += chunk.slice(0, Math.max(0, budget - out.length));
-      break;
-    }
-    out += chunk;
+/** A file's share of the budget below this is too little to show anything useful, so the lowest-priority files are left out instead. */
+const MIN_FILE_SHARE = 1024;
+const CUT_MARKER = "\n[diff cut here]\n";
+
+export interface DiffExtract {
+  text: string;
+  /** Some of the diff is missing from `text`: a file was cut short or left out. */
+  truncated: boolean;
+}
+
+/** The largest cap such that giving every size at most that much stays within `budget`; Infinity if all of them fit. */
+function fairShare(sizes: number[], budget: number): number {
+  const sorted = [...sizes].sort((a, b) => a - b);
+  let left = budget;
+  for (let i = 0; i < sorted.length; i++) {
+    const n = sorted.length - i;
+    if (sorted[i] * n > left) return Math.floor(left / n);
+    left -= sorted[i];
   }
-  return out;
+  return Infinity;
+}
+
+/**
+ * The diff the model reads. Files go in priority order (migrations first). When it all fits it is sent whole. When
+ * it does not, every file gets an equal share (small files keep all of theirs, and the unused part goes to the
+ * big ones), so one large file cannot push the rest out. A file cut short is marked, and so is the diff as a whole,
+ * because the model must not take what it did not see for safe. `budget` limits the diff itself; the markers are extra.
+ */
+export function buildDiffExtract(files: ChangedFile[], budget = PATCH_BUDGET): DiffExtract {
+  const chunks = [...files]
+    .sort((a, b) => rank(a.filename) - rank(b.filename))
+    .filter((f) => f.patch)
+    .map((f) => `--- ${f.filename} (${f.status})\n${f.patch}\n`);
+  if (chunks.reduce((n, c) => n + c.length, 0) <= budget) return { text: chunks.join(""), truncated: false };
+
+  let shown = chunks;
+  let cap = fairShare(shown.map((c) => c.length), budget);
+  while (cap < MIN_FILE_SHARE && shown.length > 1) {
+    shown = shown.slice(0, -1);
+    cap = fairShare(shown.map((c) => c.length), budget);
+  }
+  const omitted = chunks.length - shown.length;
+  let cut = 0;
+  const parts = shown.map((c) => {
+    if (c.length <= cap) return c;
+    cut++;
+    const head = c.slice(0, cap - CUT_MARKER.length);
+    return head.slice(0, head.lastIndexOf("\n") + 1 || head.length) + CUT_MARKER.slice(1);
+  });
+  const notice = `[Diff truncated: ${cut} file(s) cut short, ${omitted} file(s) not shown. Part of this change was not available to read. Do not assume the missing part is safe.]\n`;
+  return { text: parts.join("") + notice, truncated: true };
+}
+
+/** Only the text of the extract; see buildDiffExtract. */
+export function buildPatchExtract(files: ChangedFile[], budget = PATCH_BUDGET): string {
+  return buildDiffExtract(files, budget).text;
 }
 
 export class GitHubClient {
@@ -215,12 +259,14 @@ export async function installationToken(env: Env, installationId: number, fetchF
 
 export function assembleContext(ev: PullRequestEvent, files: ChangedFile[]): PrContext {
   const pr = ev.pull_request;
+  const extract = buildDiffExtract(files);
   return {
     title: pr.title,
     body: pr.body ?? "",
     baseBranch: pr.base.ref,
     headSha: pr.head.sha,
     files,
-    patchExtract: buildPatchExtract(files),
+    patchExtract: extract.text,
+    diffTruncated: extract.truncated,
   };
 }

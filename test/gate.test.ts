@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { verifySignature } from "../src/crypto";
 import { handleWebhook, processMergeGroup, processPullRequest } from "../src/handler";
-import { buildPatchExtract, clearInstallationTokenCache, COMMENT_MARKER, installationToken } from "../src/github";
+import { assembleContext, buildDiffExtract, buildPatchExtract, clearInstallationTokenCache, COMMENT_MARKER, installationToken } from "../src/github";
 import { evaluatePolicy } from "../src/policy";
 import type { Env, JevResult, MergeGroupEvent, PullRequestEvent } from "../src/types";
 
@@ -49,6 +49,16 @@ describe("policy", () => {
   it("low confidence is ambiguous", () => {
     expect(evaluatePolicy(j({ classificationConfidence: 0.5 }), src, opts).reason).toBe("ambiguous");
   });
+  it("a truncated diff is ambiguous even with a clean plan", () => {
+    const v = evaluatePolicy(j(), src, { ...opts, diffTruncated: true });
+    expect(v).toMatchObject({ conclusion: "failure", reason: "ambiguous" });
+    expect(v.summary).toContain("too large");
+  });
+  it("a truncated diff does not hide a type 1 result", () => {
+    const t = { ...opts, diffTruncated: true };
+    expect(evaluatePolicy(j({ oneWayProb: 0.9 }), src, t).reason).toBe("type1_no_adr");
+    expect(evaluatePolicy(j({ oneWayProb: 0.9 }), adr, t).reason).toBe("type1_adr");
+  });
   it("type2 with plan passes, without fails", () => {
     expect(evaluatePolicy(j(), src, opts).reason).toBe("type2_ok");
     expect(evaluatePolicy(j({ reversalProb: 0.69 }), src, opts).reason).toBe("type2_no_plan");
@@ -60,13 +70,76 @@ describe("policy", () => {
 });
 
 describe("patch extract", () => {
-  it("puts migrations first and respects the budget", () => {
+  const lines = (n: number, tag = "row") => Array.from({ length: n }, (_, i) => `+${tag} ${i}`).join("\n");
+  const BUDGET = 10_000;
+
+  it("puts migrations first and sends a diff that fits whole, unmarked", () => {
     const files = [
       { filename: "src/readme.ts", status: "modified", patch: "x".repeat(100) },
       { filename: "migrations/001.sql", status: "added", patch: "CREATE TABLE a;" },
     ];
-    expect(buildPatchExtract(files).startsWith("--- migrations/001.sql")).toBe(true);
-    expect(buildPatchExtract(files, 50).length).toBeLessThanOrEqual(50);
+    const e = buildDiffExtract(files);
+    expect(e.text.startsWith("--- migrations/001.sql")).toBe(true);
+    expect(e.text).toContain("x".repeat(100));
+    expect(e.truncated).toBe(false);
+    expect(e.text).not.toContain("truncated");
+  });
+
+  it("does not count a file with no patch (binary, or too big for GitHub) as truncation", () => {
+    const e = buildDiffExtract([{ filename: "logo.png", status: "added" }, { filename: "src/a.ts", status: "added", patch: "+a" }]);
+    expect(e).toEqual({ text: "--- src/a.ts (added)\n+a\n", truncated: false });
+  });
+
+  it("gives a small file its whole diff even when a big file comes first", () => {
+    const small = "+DROP TABLE users;";
+    const e = buildDiffExtract(
+      [
+        { filename: "src/generated.ts", status: "modified", patch: lines(5000) },
+        { filename: "src/jobs/purge.ts", status: "added", patch: small },
+      ],
+      BUDGET,
+    );
+    expect(e.truncated).toBe(true);
+    expect(e.text).toContain(small);
+    expect(e.text).toContain("[diff cut here]");
+    expect(e.text).toContain("1 file(s) cut short, 0 file(s) not shown");
+  });
+
+  it("keeps the diff itself within the budget; only the notice is extra", () => {
+    const e = buildDiffExtract([{ filename: "a.ts", status: "m", patch: lines(5000) }, { filename: "b.ts", status: "m", patch: lines(5000) }], BUDGET);
+    const notice = e.text.slice(e.text.lastIndexOf("[Diff truncated"));
+    expect(e.text.length - notice.length).toBeLessThanOrEqual(BUDGET);
+    expect(notice).toContain("Do not assume the missing part is safe");
+  });
+
+  it("cuts a single oversized file at a line boundary and says so", () => {
+    const e = buildDiffExtract([{ filename: "a.ts", status: "m", patch: lines(5000) }], BUDGET);
+    expect(e.truncated).toBe(true);
+    const body = e.text.slice(0, e.text.indexOf("[diff cut here]"));
+    expect(body.endsWith("\n")).toBe(true);
+    expect(body.split("\n").at(-2)).toMatch(/^\+row \d+$/);
+  });
+
+  it("leaves out the lowest-priority files rather than showing slivers of all of them", () => {
+    const files = [
+      ...Array.from({ length: 100 }, (_, i) => ({ filename: `src/f${i}.ts`, status: "m", patch: "x".repeat(2000) })),
+      { filename: "migrations/001.sql", status: "added", patch: "DROP TABLE a;" },
+    ];
+    const e = buildDiffExtract(files, BUDGET);
+    expect(e.truncated).toBe(true);
+    expect(e.text).toContain("--- migrations/001.sql");
+    expect(e.text).toMatch(/\d+ file\(s\) not shown/);
+    expect(e.text).not.toContain("--- src/f99.ts");
+  });
+
+  it("buildPatchExtract is the text alone", () => {
+    expect(buildPatchExtract([{ filename: "a.ts", status: "m", patch: "+a" }])).toBe("--- a.ts (m)\n+a\n");
+  });
+
+  it("the context records whether the diff was cut", () => {
+    const ev = { pull_request: { title: "t", body: null, base: { ref: "main" }, head: { sha: "s" } } } as unknown as PullRequestEvent;
+    expect(assembleContext(ev, [{ filename: "a.ts", status: "m", patch: "+a" }]).diffTruncated).toBe(false);
+    expect(assembleContext(ev, [{ filename: "a.ts", status: "m", patch: "x".repeat(60_000) }]).diffTruncated).toBe(true);
   });
 });
 
