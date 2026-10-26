@@ -174,8 +174,8 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
 
   // Immediate visual feedback in parallel with context fetch.
   const filesPending = gh.listFiles(owner, repo, pr);
-  filesPending.catch(() => {}); // awaited inside the try below; this only stops an unhandled rejection if createCheckRun throws first
-  const check = await withRetry(() => gh.createCheckRun(owner, repo, ev.pull_request.head.sha), retryDelaysMs);
+  filesPending.catch(() => {}); // awaited inside the try below; this only stops an unhandled rejection if startCheckRun throws first
+  const check = await withRetry(() => gh.startCheckRun(owner, repo, ev.pull_request.head.sha, env.GITHUB_APP_ID), retryDelaysMs);
   let files: ChangedFile[] = [];
 
   let configNote = "";
