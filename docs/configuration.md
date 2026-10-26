@@ -41,7 +41,7 @@ Every judgement is one model call, so a PR that cannot be a one-way door should 
 
 Paths are matched ignoring case. These are never safe, even though some are Markdown (`NEVER_SAFE_PATHS` in the same file): `docs/decisions/**` (an ADR is the evidence the gate looks for), and files that steer an AI agent: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/**`, `.cursor/**`, `.github/copilot-instructions.md`, `.github/instructions/**`, `.github/prompts/**`. Dependency manifests (`package.json`, `requirements.txt`) are not safe either.
 
-A PR is skipped only when **all** its changed files are safe. One code file next to a README means the PR is judged. A renamed file counts as safe only if both its old and new names are, so moving `db/schema.sql` to `docs/schema.md` is still judged.
+A PR is skipped only when **all** its changed files are safe. One code file next to a README means the PR is judged. A renamed file counts as safe only if both its old and new names are, so moving `db/schema.sql` to `docs/schema.md` is still judged. GitHub lists at most 1,000 changed files; a PR that long may have files the gate never saw, so `ignore` is not applied to it and it is judged.
 
 ```yaml
 judgements:

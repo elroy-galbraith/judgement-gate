@@ -225,6 +225,13 @@ describe("multiple judgements", () => {
       expect(finalCheck(net.calls).conclusion).toBe("failure");
     });
 
+    it("a file list that hit the GitHub limit may be cut off, so nothing is ignored", async () => {
+      // The fake returns the same 100 files for every page, which fills all 10 pages (1,000 files).
+      const readmes = Array.from({ length: 100 }, (_, i) => ({ filename: `docs/${i}.md`, status: "modified" }));
+      expect(jevCalled((await run(readmes)).calls)).toBe(true);
+      expect(jevCalled((await run(readmes.slice(0, 99))).calls)).toBe(false);
+    });
+
     it("an ADR is not a safe path", async () => {
       const net = await run([{ filename: "docs/decisions/0001-x.md", status: "added" }]);
       expect(jevCalled(net.calls)).toBe(true);
