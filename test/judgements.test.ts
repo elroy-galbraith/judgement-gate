@@ -212,5 +212,89 @@ describe("fired and reasons", () => {
     it("lists its reason codes", () => {
       expect(j.reasons).toEqual(["x_unsatisfied", "x_ok"]);
     });
+    it("asks no evidence question when no rule uses answers", () => {
+      expect(Object.keys(j.questions)).toEqual(["q"]);
+    });
+  });
+
+  describe("declarative with answers evidence (issue #22)", () => {
+    const strict = compileDeclarative({
+      id: "x",
+      name: "X",
+      question: "q?",
+      whenTrue: "t",
+      whenFalse: "f",
+      threshold: 0.6,
+      satisfiedBy: [{ answers: "What is the impact on request volume?" }],
+      why: "w",
+      fix: "f",
+    });
+    const ans = (p: number, evidence?: number): JevAnswers => ({
+      q: { noul: p },
+      ...(evidence === undefined ? {} : { evidence0: { noul: evidence } }),
+    });
+    const prBody = (body: string): PrContext => ({ ...pr(), body });
+
+    it("sends an evidence question next to the main one, in the same request", () => {
+      expect(Object.keys(strict.questions)).toEqual(["q", "evidence0"]);
+      const e = strict.questions.evidence0;
+      expect(e.type).toBe("noul");
+      expect(e.instructions).toContain("What is the impact on request volume?");
+      expect(e.instructions).toMatch(/n\/a/);
+    });
+    it("a placeholder line does not clear a flagged judgement", () => {
+      const v = strict.decide(ans(0.9, 0.05), prBody("Request impact: n/a"));
+      expect(v.conclusion).toBe("failure");
+      expect(v.reason).toBe("x_unsatisfied");
+      expect(v.fired).toBe(true);
+    });
+    it("a concrete line clears it", () => {
+      const v = strict.decide(ans(0.9, 0.92), prBody("Request impact: about 2% more reads on /orders, cached for 60s"));
+      expect(v.conclusion).toBe("success");
+      expect(v.reason).toBe("x_ok");
+      expect(v.fired).toBe(true);
+      expect(v.metrics?.cleared).toBe(true);
+    });
+    it("evidence at exactly 0.5 clears; just below does not", () => {
+      expect(strict.decide(ans(0.9, 0.5), prBody("b")).conclusion).toBe("success");
+      expect(strict.decide(ans(0.9, 0.49), prBody("b")).conclusion).toBe("failure");
+    });
+    it("a missing evidence answer does not clear", () => {
+      expect(strict.decide(ans(0.9), prBody("Request impact: n/a")).conclusion).toBe("failure");
+    });
+    it("evidence is ignored when the judgement is not flagged", () => {
+      const v = strict.decide(ans(0.2, 0.01), prBody("nothing"));
+      expect(v.conclusion).toBe("success");
+      expect(v.fired).toBe(false);
+    });
+    it("reports the evidence probability in the signals when flagged", () => {
+      expect(strict.decide(ans(0.9, 0.05), prBody("b")).signals).toContain("Evidence 5%");
+    });
+    it("does not clear on a regex-looking body: the PR text is never matched", () => {
+      expect(strict.decide(ans(0.9, 0.05), prBody("Request impact: 12 requests per second")).conclusion).toBe("failure");
+    });
+    it("numbers evidence questions by their position in satisfied_by", () => {
+      const mixed = compileDeclarative({
+        id: "m", name: "M", question: "q?", whenTrue: "t", whenFalse: "f", threshold: 0.5,
+        satisfiedBy: [{ pr_body_matches: /^Plan:/m }, { answers: "a?" }, { file_added: "docs/**" }, { answers: "b?" }],
+        why: "w", fix: "f",
+      });
+      expect(Object.keys(mixed.questions)).toEqual(["q", "evidence1", "evidence3"]);
+      const answers: JevAnswers = { q: { noul: 0.9 }, evidence1: { noul: 0.1 }, evidence3: { noul: 0.8 } };
+      expect(mixed.decide(answers, prBody("nothing")).conclusion).toBe("success");
+      expect(mixed.decide({ ...answers, evidence3: { noul: 0.1 } }, prBody("nothing")).conclusion).toBe("failure");
+    });
+    it("a regex rule listed next to answers still clears on its own", () => {
+      const mixed = compileDeclarative({
+        id: "m", name: "M", question: "q?", whenTrue: "t", whenFalse: "f", threshold: 0.5,
+        satisfiedBy: [{ pr_body_matches: /^Plan:/m }, { answers: "a?" }],
+        why: "w", fix: "f",
+      });
+      expect(mixed.decide({ q: { noul: 0.9 }, evidence1: { noul: 0.0 } }, prBody("Plan: n/a")).conclusion).toBe("success");
+    });
+    it("lists the answers rule for agents without any PR text", () => {
+      const hint = strict.agent!(strict.decide(ans(0.9, 0.05), prBody("b")), { owner: "o", repo: "r" });
+      expect(hint.satisfied_by).toEqual([{ type: "answers", question: "What is the impact on request volume?" }]);
+    });
   });
 });

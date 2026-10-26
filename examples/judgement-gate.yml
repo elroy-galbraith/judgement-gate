@@ -22,6 +22,9 @@ judgements:
     satisfied_by:                        # required; any one entry clears the flag
       - pr_body_matches: "(?i)^Migration Plan:"
       - file_added: "docs/api-changes/*.md"
+      # Stricter: the model must judge that the PR description gives a concrete answer, so "n/a" does not clear it.
+      # List `answers` alone to require it; next to a regex or file rule, that rule still clears on its own.
+      # - answers: "What is the migration path for existing consumers?"
     why: "Consumers cannot roll back with us. Breaking changes need a migration plan."
     fix: "Add a 'Migration Plan:' line to the PR description, or a new note under docs/api-changes/."
     probes:                              # optional: up to 7 short questions a reviewer will ask

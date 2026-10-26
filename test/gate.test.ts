@@ -344,6 +344,40 @@ describe("end to end", () => {
     expect(net.calls.filter((c) => c.method === "PATCH" && c.url.endsWith(`/issues/comments/${id}`))).toHaveLength(2);
   });
 
+  it("a placeholder line does not clear a judgement that asks for evidence; a concrete line does (issue #22)", async () => {
+    const env = await makeEnv({ CONFIG_REPO: "issue-22-evidence" });
+    const config = `judgements:
+  - id: request-impact
+    name: Request impact
+    question: "Does this change alter request volume or latency?"
+    true: "changes how many or how slow requests are"
+    false: "no effect on requests"
+    threshold: 0.6
+    satisfied_by:
+      - answers: "What is the impact on request volume or latency?"
+    why: "Capacity is planned from the stated impact."
+    fix: "Add a 'Request impact:' line with a number or a bound."
+`;
+    let evidence = 0.03;
+    const net = fakeNet(() => new Response(JSON.stringify({ answers: { "request-impact.q": { noul: 0.9 }, "request-impact.evidence0": { noul: evidence } } })));
+    const fetchFn: typeof fetch = (input, init) =>
+      String(input) === "https://gh.test/repos/o/issue-22-evidence/contents/.github/judgement-gate.yml"
+        ? Promise.resolve(new Response(config))
+        : net.fetchFn(input, init);
+    const event = prEvent({}, "Request impact: n/a");
+
+    await processPullRequest(event, env, fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe("failure");
+    const sent = net.calls.find((c) => c.url.includes("jev.test"))!.body.questions;
+    expect(Object.keys(sent)).toEqual(["request-impact.q", "request-impact.evidence0"]);
+    expect(net.calls.filter((c) => c.url.includes("jev.test"))).toHaveLength(1);
+
+    event.pull_request.body = "Request impact: about 2% more reads on /orders, cached for 60s";
+    evidence = 0.93;
+    await processPullRequest(event, env, fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
   it("comment failure keeps the real verdict", async () => {
     const env = await makeEnv();
     const net = fakeNet(() => new Response(JSON.stringify(jevAnswer({ one: 0.96, add: 0.1, rev: 0.1, cls: "TYPE_1_ONE_WAY_DOOR", conf: 0.8 }))));

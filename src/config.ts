@@ -92,14 +92,25 @@ function bodyRegex(pattern: unknown, where: string): RegExp {
   }
 }
 
+/** An `answers` question goes to the model verbatim, so it gets the same limits as a probe. */
+function evidenceQuestion(v: unknown, where: string): string {
+  if (typeof v !== "string" || v.trim() === "") throw new ConfigError(`${where}: answers must be a non-empty string`);
+  const t = v.trim();
+  if (t.length > MAX_PROBE_LENGTH) throw new ConfigError(`${where}: answers must be at most ${MAX_PROBE_LENGTH} characters`);
+  if (t.includes("<!--") || t.includes("-->")) throw new ConfigError(`${where}: answers must not contain an HTML comment marker`);
+  if (/[\r\n]/.test(t)) throw new ConfigError(`${where}: answers must be a single line`);
+  return t;
+}
+
 function satisfiedBy(v: unknown, where: string): SatisfiedBy[] {
   if (!Array.isArray(v) || v.length === 0) throw new ConfigError(`${where}: "satisfied_by" must be a non-empty list`);
   return v.map((entry) => {
     if (isObj(entry) && Object.keys(entry).length === 1) {
       if ("pr_body_matches" in entry) return { pr_body_matches: bodyRegex(entry.pr_body_matches, where) };
       if ("file_added" in entry && typeof entry.file_added === "string" && entry.file_added !== "") return { file_added: entry.file_added };
+      if ("answers" in entry) return { answers: evidenceQuestion(entry.answers, where) };
     }
-    throw new ConfigError(`${where}: each satisfied_by entry must be exactly one of pr_body_matches or file_added`);
+    throw new ConfigError(`${where}: each satisfied_by entry must be exactly one of pr_body_matches, file_added or answers`);
   });
 }
 

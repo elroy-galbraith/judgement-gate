@@ -13,7 +13,7 @@ A judgement is what the gate asks about a change. The Worker sends every applica
 | `question`, `true`, `false` | The yes/no question for Jev, and what each answer means. |
 | `threshold` | 0 to 1. Flagged when the probability of "true" is at least this. |
 | `applies_to` | Optional globs (`*`, `**`, `?`). Judged only if a changed file matches. Omit for always. |
-| `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars) or `file_added` (glob on a file the PR adds; modifying an existing file does not count, and a file renamed in from outside the glob does). |
+| `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars), `file_added` (glob on a file the PR adds; modifying an existing file does not count, and a file renamed in from outside the glob does) or `answers` (a question the model judges against the PR description; see [Regex proves a line exists](#regex-proves-a-line-exists-not-that-it-means-anything)). |
 | `why`, `fix` | The remedy shown to the author: why it matters, and what to do. |
 | `probes` | Optional. Short questions shown to the author as "Questions a reviewer will ask". On a declarative judgement: a list of questions. On `use: one-way-door`: a mapping with `type1` and/or `type2`, each a list of questions. At most 7 questions per list, each at most 300 characters. Static text; no model call. |
 
@@ -143,6 +143,24 @@ A missing file, an empty file, or `judgements: []` runs the built-in default. An
 ## Cost
 
 At most one extra GitHub request per isolate per 60 seconds. The Worker caches the config in memory within the isolate for 60 seconds (including on `*.workers.dev` domains) and also uses the Cloudflare Cache API as a best-effort second layer on custom domains. A new or changed config can take up to 60 seconds to apply.
+
+## Regex proves a line exists, not that it means anything
+
+`pr_body_matches` and `file_added` check that a line or file is there. They cannot tell whether it says anything. With `pr_body_matches: "(?i)^Request impact:"`, the line `Request impact: n/a` clears the judgement, and so do `none` and `tbd`. The model is asked once, about the change; after it flags the PR, only the regex decides.
+
+For a judgement where that matters, use `answers` instead. It adds a second question to the same Jev request (no extra call), asking whether the PR description gives a concrete answer to your question:
+
+```yaml
+    satisfied_by:
+      - answers: "What is the impact on request volume or latency?"
+    fix: "Add a 'Request impact:' line with a number or a bound, not n/a."
+```
+
+- A flagged PR clears when the model puts the chance of a concrete answer at 50% or more. `Request impact: n/a`, `none`, `tbd` and a line that only restates the question do not clear it; `Request impact: about 2% more reads on /orders, cached for 60s` does.
+- Entries are "any one clears". A `pr_body_matches` or `file_added` entry listed next to `answers` still clears on its own, so to require a meaningful answer, list `answers` alone.
+- The question is one line, at most 300 characters, and goes to the model as written. The failure comment shows the evidence probability next to the main one.
+- `answers` is as exposed as the main question to a PR author who writes text aimed at the model (see [#9](https://github.com/elroy-galbraith/judgement-gate/issues/9)). It raises the cost of `n/a`; it does not make the gate impossible to game. Keep a human in the loop for anything that matters.
+- It cannot clear a judgement when the model gives no evidence answer, and it adds one question to every Jev request for that judgement, flagged or not.
 
 ## Regex caution
 

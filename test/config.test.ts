@@ -538,3 +538,43 @@ describe("pr_body_matches safety (issue #23)", () => {
     expect(Date.now() - start).toBeLessThan(1000);
   });
 });
+
+describe("satisfied_by answers (issue #22)", () => {
+  const withAnswers = (entry: unknown) => decl({ satisfied_by: [entry] });
+
+  it("parses an answers entry into a judgement with an evidence question", () => {
+    const j = parseConfig(withAnswers({ answers: "What is the request impact?" }), defaults)[0];
+    expect(Object.keys(j.questions)).toEqual(["q", "evidence0"]);
+    expect(j.questions.evidence0.instructions).toContain("What is the request impact?");
+  });
+
+  it("trims the question", () => {
+    const j = parseConfig(withAnswers({ answers: "  Impact?  " }), defaults)[0];
+    expect(j.questions.evidence0.instructions).toContain('"Impact?"');
+  });
+
+  it("a placeholder fails and a concrete answer clears, per the model's evidence answer", () => {
+    const j = parseConfig(withAnswers({ answers: "What is the request impact?" }), defaults)[0];
+    const flagged = (evidence: number) => j.decide({ q: { noul: 0.9 }, evidence0: { noul: evidence } }, pr("Request impact: n/a")).conclusion;
+    expect(flagged(0.04)).toBe("failure");
+    expect(flagged(0.9)).toBe("success");
+  });
+
+  const bad: [string, unknown][] = [
+    ["empty", { answers: "" }],
+    ["blank", { answers: "   " }],
+    ["not a string", { answers: 5 }],
+    ["a list", { answers: ["a?", "b?"] }],
+    ["too long", { answers: "a".repeat(301) }],
+    ["multi-line", { answers: "a?\nb?" }],
+    ["an HTML comment marker", { answers: "a? -->" }],
+    ["combined with another key", { answers: "a?", pr_body_matches: "x" }],
+  ];
+  it.each(bad)("rejects answers that is %s", (_name, entry) => {
+    expect(() => parseConfig(withAnswers(entry), defaults)).toThrow(ConfigError);
+  });
+
+  it("the error names answers among the allowed kinds", () => {
+    expect(() => parseConfig(withAnswers({ bogus: 1 }), defaults)).toThrow(/pr_body_matches, file_added or answers/);
+  });
+});
