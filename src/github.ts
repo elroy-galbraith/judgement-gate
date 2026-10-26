@@ -1,4 +1,5 @@
 import { appJwt } from "./crypto";
+import { isSafePath } from "./safe-paths";
 import type { ChangedFile, Env, FetchFn, PrContext, PullRequestEvent } from "./types";
 
 export const CHECK_NAME = "judgement-gate";
@@ -29,7 +30,10 @@ const CUT_MARKER = "\n[diff cut here]\n";
 
 export interface DiffExtract {
   text: string;
-  /** Some of the diff is missing from `text`: a file was cut short or left out. */
+  /**
+   * Part of the diff is missing from `text`: a file was cut short or left out. Docs, images and lockfiles do not count
+   * (see `isSafePath`): they cannot make a change hard to undo, and a big lockfile would otherwise flag every bump.
+   */
   truncated: boolean;
 }
 
@@ -45,35 +49,69 @@ function fairShare(sizes: number[], budget: number): number {
   return Infinity;
 }
 
-/**
- * The diff the model reads. Files go in priority order (migrations first). When it all fits it is sent whole. When
- * it does not, every file gets an equal share (small files keep all of theirs, and the unused part goes to the
- * big ones), so one large file cannot push the rest out. A file cut short is marked, and so is the diff as a whole,
- * because the model must not take what it did not see for safe. `budget` limits the diff itself; the markers are extra.
- */
-export function buildDiffExtract(files: ChangedFile[], budget = PATCH_BUDGET): DiffExtract {
-  const chunks = [...files]
-    .sort((a, b) => rank(a.filename) - rank(b.filename))
-    .filter((f) => f.patch)
-    .map((f) => `--- ${f.filename} (${f.status})\n${f.patch}\n`);
-  if (chunks.reduce((n, c) => n + c.length, 0) <= budget) return { text: chunks.join(""), truncated: false };
+function cutShort(chunk: string, cap: number): string {
+  const head = chunk.slice(0, Math.max(0, cap - CUT_MARKER.length));
+  const newline = head.lastIndexOf("\n");
+  return (newline >= 0 ? head.slice(0, newline + 1) : `${head}\n`) + CUT_MARKER.slice(1);
+}
 
-  let shown = chunks;
-  let cap = fairShare(shown.map((c) => c.length), budget);
-  while (cap < MIN_FILE_SHARE && shown.length > 1) {
-    shown = shown.slice(0, -1);
-    cap = fairShare(shown.map((c) => c.length), budget);
+interface Fitted {
+  parts: string[];
+  used: number;
+  cut: number;
+  omitted: number;
+}
+
+/**
+ * Fit `chunks` (highest priority first) into `budget`. Whole if they fit. Otherwise every file gets an equal share
+ * (small files keep all of theirs, and what they leave goes to the big ones), and if the share would be under
+ * MIN_FILE_SHARE the lowest-priority files are left out. `keepOne` shows the first file even then.
+ */
+function fit(chunks: string[], budget: number, keepOne: boolean): Fitted {
+  const used = (parts: string[]) => parts.reduce((n, c) => n + c.length, 0);
+  if (used(chunks) <= budget) return { parts: chunks, used: used(chunks), cut: 0, omitted: 0 };
+  const sizes = chunks.map((c) => c.length);
+  // The share only shrinks as files are added, so bisect for the most files that each still get a useful share.
+  let lo = keepOne ? 1 : 0;
+  let hi = chunks.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fairShare(sizes.slice(0, mid), budget) >= MIN_FILE_SHARE) lo = mid;
+    else hi = mid - 1;
   }
-  const omitted = chunks.length - shown.length;
+  const cap = fairShare(sizes.slice(0, lo), budget);
   let cut = 0;
-  const parts = shown.map((c) => {
+  const parts = chunks.slice(0, lo).map((c) => {
     if (c.length <= cap) return c;
     cut++;
-    const head = c.slice(0, cap - CUT_MARKER.length);
-    return head.slice(0, head.lastIndexOf("\n") + 1 || head.length) + CUT_MARKER.slice(1);
+    return cutShort(c, cap);
   });
-  const notice = `[Diff truncated: ${cut} file(s) cut short, ${omitted} file(s) not shown. Part of this change was not available to read. Do not assume the missing part is safe.]\n`;
-  return { text: parts.join("") + notice, truncated: true };
+  return { parts, used: used(parts), cut, omitted: chunks.length - lo };
+}
+
+/** Docs, images and lockfiles. A rename counts only if both names are, as in `appliesToFiles`. */
+const isSafeFile = (f: ChangedFile) => isSafePath(f.filename) && (f.previous_filename === undefined || isSafePath(f.previous_filename));
+
+/**
+ * The diff the model reads. Files go in priority order (migrations first), with docs, images and lockfiles last: they
+ * get only what the rest leaves over, and being cut never makes the diff `truncated`. When everything fits it is sent
+ * whole. Otherwise see `fit`. A file cut short is marked, and so is the diff, because the model must not take what it
+ * did not see for safe. `budget` limits the diff itself; the notice is extra.
+ */
+export function buildDiffExtract(files: ChangedFile[], budget = PATCH_BUDGET): DiffExtract {
+  const withPatch = [...files].sort((a, b) => rank(a.filename) - rank(b.filename)).filter((f) => f.patch);
+  const chunk = (f: ChangedFile) => `--- ${f.filename} (${f.status})\n${f.patch}\n`;
+  const main = fit(withPatch.filter((f) => !isSafeFile(f)).map(chunk), budget, true);
+  const rest = fit(withPatch.filter(isSafeFile).map(chunk), Math.max(0, budget - main.used), false);
+  const truncated = main.cut + main.omitted > 0;
+  const restMissing = rest.cut + rest.omitted;
+  let notice = "";
+  if (truncated) {
+    notice = `[Diff truncated: ${main.cut + rest.cut} file(s) cut short, ${main.omitted + rest.omitted} file(s) not shown. Part of this change was not available to read. Do not assume the missing part is safe.]\n`;
+  } else if (restMissing > 0) {
+    notice = `[Diff truncated: ${restMissing} doc, image or lockfile diff(s) were cut short or left out. Every other file is shown in full.]\n`;
+  }
+  return { text: [...main.parts, ...rest.parts].join("") + notice, truncated };
 }
 
 /** Only the text of the extract; see buildDiffExtract. */

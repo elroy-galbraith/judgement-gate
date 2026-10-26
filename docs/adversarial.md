@@ -58,7 +58,7 @@ Corpus run 3 times per case, plus 5 times for the cap cases. Raw runs are not co
 
 ### What this suggests
 
-1. ~~Fix the cap.~~ Done: a per-file share of the budget, a truncation notice in the diff the model reads, and a truncated diff is `ambiguous` (see [operations](operations.md)). Still open: a file GitHub sends without a patch (binary, or too big for its API) is skipped silently and does not count as truncation, and the declarative judgements are not affected by truncation.
+1. ~~Fix the cap.~~ Done: a per-file share of the budget, a truncation notice in the diff the model reads, and a truncated diff is `ambiguous` (see [operations](operations.md)). Docs, images and lockfiles do not count toward truncation: code review of the fix found that a big lockfile diff would otherwise make every dependency bump ambiguous, and `ow-ctl-big-lockfile` now holds that as a control (passed 5/5 live). Still open: a file GitHub sends without a patch (binary, or too big for its API) is skipped silently and does not count as truncation, and the declarative judgements are not affected by truncation.
 2. Do not build the regex placeholder pre-check for the one-way-door plan lines. The model rejected every placeholder in the corpus, so it would add code without closing a measured gap. Revisit if a future model version or a new corpus case shows otherwise.
 3. Recommend `answers` in the shipped example config and docs, with the regex form described as clearing on form, not substance.
 

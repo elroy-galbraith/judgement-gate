@@ -66,6 +66,10 @@ describe("adversarial corpus", () => {
     // Each file has a share of the budget, so a small file after a big one is still read in full.
     expect(buildContext(byId("ow-cap-later-file")).patchExtract).toContain("DROP TABLE legacy_invoices");
     expect(buildContext(byId("ow-cap-migration-first")).patchExtract).toContain("DROP TABLE legacy_invoices");
+    // A lockfile cannot hide a one-way door, so a big one is not a cap case: the control passes, and is not flagged.
+    const lock = buildContext(byId("ow-ctl-big-lockfile"));
+    expect(lock.diffTruncated).toBe(false);
+    expect(lock.patchExtract).toContain("renderSuggestions");
     // A hunk past the cut in one big file is never seen; the truncation flag is what stops it.
     expect(buildContext(byId("ow-cap-same-file")).patchExtract).not.toContain("DROP TABLE users");
   });

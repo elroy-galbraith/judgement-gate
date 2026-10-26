@@ -132,6 +132,58 @@ describe("patch extract", () => {
     expect(e.text).not.toContain("--- src/f99.ts");
   });
 
+  describe("docs, images and lockfiles", () => {
+    const code = { filename: "src/app.ts", status: "modified", patch: "+import x from 'y';\n+x();" };
+
+    it("a big lockfile diff does not make the diff truncated, and the code is shown whole", () => {
+      const e = buildDiffExtract([code, { filename: "package-lock.json", status: "modified", patch: lines(5000) }], BUDGET);
+      expect(e.truncated).toBe(false);
+      expect(e.text).toContain("+x();");
+      expect(e.text).toContain("[diff cut here]");
+      expect(e.text).toContain("Every other file is shown in full");
+      expect(e.text).not.toContain("Do not assume");
+    });
+
+    it("a big docs diff does not make the diff truncated", () => {
+      expect(buildDiffExtract([{ filename: "docs/guide.md", status: "modified", patch: lines(5000) }, code], BUDGET).truncated).toBe(false);
+    });
+
+    it("they come after the code, even when a lockfile would rank ahead of it", () => {
+      const e = buildDiffExtract([{ filename: "yarn.lock", status: "modified", patch: "+lock" }, code]);
+      expect(e.text.indexOf("src/app.ts")).toBeLessThan(e.text.indexOf("yarn.lock"));
+    });
+
+    it("they get only what the code leaves over, and are left out when that is under the minimum", () => {
+      const e = buildDiffExtract([{ filename: "src/big.ts", status: "modified", patch: lines(5000) }, { filename: "README.md", status: "modified", patch: "+docs" }], BUDGET);
+      expect(e.truncated).toBe(true);
+      expect(e.text).not.toContain("README.md");
+      expect(e.text).toContain("1 file(s) cut short, 1 file(s) not shown");
+    });
+
+    it("an ADR is not safe: a big one counts as truncation", () => {
+      expect(buildDiffExtract([{ filename: "docs/decisions/0001-x.md", status: "added", patch: lines(5000) }], BUDGET).truncated).toBe(true);
+    });
+
+    it("a file renamed from a code name to a docs name is not safe", () => {
+      const moved = { filename: "notes.md", previous_filename: "src/app.ts", status: "renamed", patch: lines(5000) };
+      expect(buildDiffExtract([moved], BUDGET).truncated).toBe(true);
+    });
+  });
+
+  it("a budget too small for the marker does not wrap around and show the end of the patch", () => {
+    const e = buildDiffExtract([{ filename: "a.ts", status: "m", patch: "START" + "x".repeat(200) + "END" }], 10);
+    expect(e.truncated).toBe(true);
+    expect(e.text).not.toContain("END");
+  });
+
+  it("a cut always ends on a line break, so the marker is on its own line", () => {
+    const one = buildDiffExtract([{ filename: "a.ts", status: "m", patch: "x".repeat(5000) }], 2000);
+    expect(one.text.startsWith("--- a.ts (m)\n[diff cut here]\n")).toBe(true);
+    // Even when the cap ends inside the header line, with no line break to back up to.
+    const long = buildDiffExtract([{ filename: "x".repeat(300), status: "m", patch: "+a\n".repeat(500) }], 200);
+    expect(long.text).toMatch(/x\n\[diff cut here\]\n/);
+  });
+
   it("buildPatchExtract is the text alone", () => {
     expect(buildPatchExtract([{ filename: "a.ts", status: "m", patch: "+a" }])).toBe("--- a.ts (m)\n+a\n");
   });
