@@ -4,9 +4,11 @@
 #
 # Note: a non-empty list REPLACES the default. List `use: one-way-door` to keep it running.
 judgements:
-  # Built-in: is this a one-way door? Optional overrides: confidence_threshold, applies_to, probes.
+  # Built-in: is this a one-way door? Optional overrides: confidence_threshold, applies_to, ignore, probes.
+  # By default it skips PRs that only touch docs, images and lockfiles. `ignore` replaces that set; `ignore: []` turns it off.
   - use: one-way-door
     confidence_threshold: 0.75
+    # ignore: ["vendor/**", "**/*.md"]   # optional: replace the default safe set
     # probes:                            # optional: replace the built-in questions shown to the author
     #   type1: ["Who else reads this table, and how do you know?"]
     #   type2: ["What signal tells you to roll back, and who watches it?"]
@@ -19,6 +21,7 @@ judgements:
     false: "additive or internal only"
     threshold: 0.6                       # flagged when P(true) >= threshold
     applies_to: ["services/api/**"]      # only judged when a changed file matches
+    # ignore: ["**/*.md"]                # optional: these files do not count (a custom judgement ignores nothing by default)
     satisfied_by:                        # required; any one entry clears the flag
       - pr_body_matches: "(?i)^Migration Plan:"
       - file_added: "docs/api-changes/*.md"

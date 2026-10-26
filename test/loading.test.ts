@@ -191,6 +191,79 @@ describe("multiple judgements", () => {
     expect(out.output.summary).toContain("No applicable judgements");
   });
 
+  describe("safe paths", () => {
+    const jevCalled = (calls: { url: string }[]) => calls.some((c) => c.url.includes("jev.test"));
+    const run = async (files: { filename: string; status: string; previous_filename?: string }[], config: string | null = null, ev = prEvent()) => {
+      clearConfigCache(); // the config is cached per owner, and a test may run several configs
+      const net = fakeNet({ config: config === null ? { status: 404 } : { status: 200, body: config }, answers: type1, files });
+      await processPullRequest(ev, await makeEnv(), net.fetchFn);
+      return net;
+    };
+
+    it("a README-only PR passes without calling Jev", async () => {
+      const net = await run([{ filename: "README.md", status: "modified" }]);
+      expect(jevCalled(net.calls)).toBe(false);
+      expect(finalCheck(net.calls).conclusion).toBe("success");
+    });
+
+    it("docs, images and a lockfile together pass without calling Jev", async () => {
+      const net = await run([
+        { filename: "docs/guide.md", status: "modified" },
+        { filename: "assets/logo.png", status: "added" },
+        { filename: "package-lock.json", status: "modified" },
+      ]);
+      expect(jevCalled(net.calls)).toBe(false);
+      expect(finalCheck(net.calls).conclusion).toBe("success");
+    });
+
+    it("one code file next to a README is still judged", async () => {
+      const net = await run([
+        { filename: "README.md", status: "modified" },
+        { filename: "src/a.ts", status: "modified" },
+      ]);
+      expect(jevCalled(net.calls)).toBe(true);
+      expect(finalCheck(net.calls).conclusion).toBe("failure");
+    });
+
+    it("an ADR is not a safe path", async () => {
+      const net = await run([{ filename: "docs/decisions/0001-x.md", status: "added" }]);
+      expect(jevCalled(net.calls)).toBe(true);
+    });
+
+    it("a risky file renamed to a Markdown name is still judged", async () => {
+      const net = await run([{ filename: "docs/notes.md", status: "renamed", previous_filename: "db/schema.sql" }]);
+      expect(jevCalled(net.calls)).toBe(true);
+    });
+
+    it("use: one-way-door with ignore: [] judges a README-only PR", async () => {
+      const net = await run([{ filename: "README.md", status: "modified" }], "judgements:\n  - use: one-way-door\n    ignore: []\n");
+      expect(jevCalled(net.calls)).toBe(true);
+    });
+
+    it("a custom ignore replaces the safe set", async () => {
+      const config = "judgements:\n  - use: one-way-door\n    ignore: ['vendor/**']\n";
+      expect(jevCalled((await run([{ filename: "vendor/x.go", status: "modified" }], config)).calls)).toBe(false);
+      expect(jevCalled((await run([{ filename: "README.md", status: "modified" }], config)).calls)).toBe(true);
+    });
+
+    it("a custom judgement ignores nothing unless it says so, and it is not skipped when only the built-in is", async () => {
+      const readme = [{ filename: "README.md", status: "modified" }];
+      const declarative = (ignore: string) =>
+        `judgements:\n  - id: docs-rule\n    name: Docs rule\n    question: "Q?"\n    true: "t"\n    false: "f"\n    threshold: 0.5\n${ignore}    satisfied_by:\n      - pr_body_matches: "ok"\n    why: "w"\n    fix: "f"\n`;
+      expect(jevCalled((await run(readme, declarative(""))).calls)).toBe(true);
+      expect(jevCalled((await run(readme, declarative("    ignore: ['**/*.md']\n"))).calls)).toBe(false);
+    });
+
+    it("a bot author is evaluated like anyone else: a manifest bump is judged, a lockfile-only bump is not", async () => {
+      const dependabot = {
+        ...prEvent(),
+        pull_request: { ...prEvent().pull_request, user: { login: "dependabot[bot]", type: "Bot" } },
+      } as PullRequestEvent;
+      expect(jevCalled((await run([{ filename: "package.json", status: "modified" }], null, dependabot)).calls)).toBe(true);
+      expect(jevCalled((await run([{ filename: "package-lock.json", status: "modified" }], null, dependabot)).calls)).toBe(false);
+    });
+  });
+
   it("declarative judgement flagged and unsatisfied -> failure and a teaching comment", async () => {
     const net = fakeNet({ config: { status: 200, body: CONFIG }, answers: { ...benign, "public-api-contract.q": { noul: 0.9 } }, files: apiFiles });
     await processPullRequest(prEvent("nope"), await makeEnv(), net.fetchFn);

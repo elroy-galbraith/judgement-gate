@@ -4,6 +4,7 @@ import { oneWayDoor, type OneWayDoorProbes } from "./one-way-door";
 export interface BuiltinOverrides {
   confidence_threshold?: number;
   applies_to?: string[];
+  ignore?: string[];
   probes?: OneWayDoorProbes;
 }
 
@@ -19,6 +20,7 @@ export function builtinById(id: string, overrides: BuiltinOverrides, defaults: B
       return oneWayDoor({
         confidenceThreshold: overrides.confidence_threshold ?? defaults.confidenceThreshold,
         appliesTo: overrides.applies_to,
+        ignore: overrides.ignore,
         probes: overrides.probes,
       });
     default:

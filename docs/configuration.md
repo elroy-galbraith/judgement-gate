@@ -8,11 +8,12 @@ A judgement is what the gate asks about a change. The Worker sends every applica
 
 | Key | Meaning |
 |---|---|
-| `use` | Enable a built-in (`one-way-door`). Only `confidence_threshold`, `applies_to` and `probes` may be overridden. |
+| `use` | Enable a built-in (`one-way-door`). Only `confidence_threshold`, `applies_to`, `ignore` and `probes` may be overridden. |
 | `id`, `name` | Unique id (kebab-case) and the name shown in the comment. |
 | `question`, `true`, `false` | The yes/no question for Jev, and what each answer means. |
 | `threshold` | 0 to 1. Flagged when the probability of "true" is at least this. |
 | `applies_to` | Optional globs (`*`, `**`, `?`). Judged only if a changed file matches. Omit for always. |
+| `ignore` | Optional globs. Files that match are not counted when deciding whether the judgement applies; see [Safe paths and `ignore`](#safe-paths-and-ignore). |
 | `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars), `file_added` (glob on a file the PR adds; modifying an existing file does not count, and a file renamed in from outside the glob does) or `answers` (a question the model judges against the PR description; see [Regex proves a line exists](#regex-proves-a-line-exists-not-that-it-means-anything)). |
 | `why`, `fix` | The remedy shown to the author: why it matters, and what to do. |
 | `probes` | Optional. Short questions shown to the author as "Questions a reviewer will ask". On a declarative judgement: a list of questions. On `use: one-way-door`: a mapping with `type1` and/or `type2`, each a list of questions. At most 7 questions per list, each at most 300 characters. Static text; no model call. |
@@ -22,6 +23,46 @@ The built-in `one-way-door` ships default probes for type 1 and type 2 verdicts,
 Severity is a different kind of entry, with `classify:` instead of `question`/`true`/`false`; see [Severity](#severity).
 
 **A non-empty list replaces the default.** If you list only your own judgement, `one-way-door` stops running org-wide. Add `- use: one-way-door` to keep it.
+
+## Safe paths and `ignore`
+
+Every judgement is one model call, so a PR that cannot be a one-way door should not cost one. A judgement applies to a PR when at least one changed file is **not ignored** and, if the judgement has `applies_to`, matches it. When no judgement applies, the Worker does not call Jev and the check passes with "No applicable judgements".
+
+`ignore` takes globs (same syntax as `applies_to`) and works on every kind of judgement. There is no negation in a glob, so `ignore` is how you write "everything except docs".
+
+**The built-in `one-way-door` ignores a default safe set**, so these PRs pass without a model call:
+
+| Safe | Globs (see `SAFE_PATHS` in [src/safe-paths.ts](../src/safe-paths.ts)) |
+|---|---|
+| Markdown | `**/*.md` |
+| Images | `**/*.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.ico` |
+| Issue templates, licence | `.github/ISSUE_TEMPLATE/**`, `LICENSE` |
+| Lockfiles | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `Cargo.lock`, `poetry.lock`, `uv.lock`, `Gemfile.lock`, `composer.lock`, `go.sum` |
+
+Paths are matched ignoring case. These are never safe, even though some are Markdown (`NEVER_SAFE_PATHS` in the same file): `docs/decisions/**` (an ADR is the evidence the gate looks for), and files that steer an AI agent: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/**`, `.cursor/**`, `.github/copilot-instructions.md`, `.github/instructions/**`, `.github/prompts/**`. Dependency manifests (`package.json`, `requirements.txt`) are not safe either.
+
+A PR is skipped only when **all** its changed files are safe. One code file next to a README means the PR is judged. A renamed file counts as safe only if both its old and new names are, so moving `db/schema.sql` to `docs/schema.md` is still judged.
+
+```yaml
+judgements:
+  - use: one-way-door
+    ignore: ["vendor/**", "**/*.md"]   # replaces the default safe set (it does not add to it)
+  # ignore: []                         # opt out: judge every PR, including README-only ones
+  - id: public-api-contract
+    ...
+    ignore: ["**/*.md"]                # a custom judgement ignores nothing unless you say so
+```
+
+An explicit `ignore` on `use: one-way-door` **replaces** the default set. `ignore: []` turns the default off. A custom judgement has no default, because it asks something specific; give it `ignore` if docs cannot trigger it.
+
+### Bot authors
+
+The gate does not look at who opened the PR. Dependabot and Renovate PRs are judged the same as any other:
+
+- A lockfile-only update is in the safe set, so it passes without a model call.
+- A PR that changes `package.json`, a Dockerfile, a workflow file or any other non-safe file is judged. Those are the bot PRs that can still matter, and skipping every bot would also skip a bot account that was compromised or misconfigured.
+
+If your bot PRs are noisy, add paths to `ignore` rather than trusting the author name.
 
 ## Severity
 
@@ -55,7 +96,7 @@ judgements:
 | `classify.levels` | A list of at least 2 levels, most severe first. Each has `id` and `means` and nothing else. |
 | `levels[].id` | 1 to 32 letters, digits, `.`, `_` or `-`; not digits only (`P1` or `Sev1`, not `1`). Unique, ignoring case. Free-form: nothing assumes a `P` prefix. |
 | `levels[].means` | What the level means, written as a rubric the model can apply. |
-| `applies_to` | Optional globs, as for any judgement. |
+| `applies_to`, `ignore` | Optional globs, as for any judgement. |
 
 The levels are a list so their order is explicit. `threshold`, `satisfied_by`, `why`, `fix` and `probes` do not apply to a classifier (it never fails, so there is nothing to teach) and are rejected as unknown keys.
 

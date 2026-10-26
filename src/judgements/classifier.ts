@@ -1,3 +1,4 @@
+import { globMatcher } from "../glob";
 import type { JevAnswers, Judgement } from "../types";
 
 export interface ClassifierLevel {
@@ -12,6 +13,7 @@ export interface ClassifierSpec {
   /** Ordered, most severe first. */
   levels: ClassifierLevel[];
   appliesTo?: string[];
+  ignore?: string[];
 }
 
 /**
@@ -27,6 +29,7 @@ export function compileClassifier(spec: ClassifierSpec): Judgement {
     kind: "classifier",
     optionalAnswers: true,
     appliesTo: spec.appliesTo,
+    ignores: spec.ignore && spec.ignore.length > 0 ? globMatcher(spec.ignore) : undefined,
     reasons: [classified, unreported],
     questions: {
       q: { type: "choice", instructions: spec.question, criteria: Object.fromEntries(spec.levels.map((l) => [l.id, l.means])) },

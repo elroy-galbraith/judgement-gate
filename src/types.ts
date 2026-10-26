@@ -135,6 +135,8 @@ export interface Judgement {
   name: string;
   /** Globs against changed filenames; omitted means the judgement always applies. */
   appliesTo?: string[];
+  /** Changed files for which this returns true are not considered when deciding whether the judgement applies. */
+  ignores?: (filename: string) => boolean;
   /** Send question keys without the `${id}.` prefix. Only the built-in one-way-door uses this, to keep its original Jev contract. */
   unprefixedKeys?: boolean;
   /** A classifier labels the PR and never fails it, so it never fires. Default: a yes/no judgement that can flag. */

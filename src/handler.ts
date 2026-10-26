@@ -186,7 +186,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     const { judgements: all, routing: setup, note } = await loadGateConfig(gh, owner, env);
     routingSetup = setup;
     if (note) configNote = `\n\n_${note}_`;
-    const applicable = all.filter((j) => appliesToFiles(j.appliesTo, files));
+    const applicable = all.filter((j) => appliesToFiles(j.appliesTo, files, j.ignores));
     evaluated = applicable;
 
     let results: JudgementResult[] = [];

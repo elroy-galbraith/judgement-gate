@@ -61,7 +61,7 @@ const benign = {
 const benignWithPlan = { ...benign, has_concrete_reversal_plan: { noul: 0.9 } };
 
 const svcFile = { filename: "services/checkout/pay.ts", status: "modified", patch: "+SECRET-DIFF" };
-const otherFile = { filename: "docs/readme.md", status: "modified", patch: "+x" };
+const otherFile = { filename: "lib/other.ts", status: "modified", patch: "+x" };
 
 function fakeNet(answers: Record<string, unknown>, files = [svcFile], config: string | null = CONFIG) {
   const calls: Call[] = [];

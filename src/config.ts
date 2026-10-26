@@ -12,7 +12,7 @@ export class ConfigError extends Error {}
 const MAX_REGEX = 200;
 const MAX_PROBES = 7;
 const MAX_PROBE_LENGTH = 300;
-const USE_KEYS = new Set(["use", "confidence_threshold", "applies_to", "probes"]);
+const USE_KEYS = new Set(["use", "confidence_threshold", "applies_to", "ignore", "probes"]);
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -27,6 +27,15 @@ function globs(v: unknown, where: string): string[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v) || v.length === 0 || v.some((g) => typeof g !== "string" || g === "")) {
     throw new ConfigError(`${where}: "applies_to" must be a non-empty list of glob strings (omit it to always apply)`);
+  }
+  return v as string[];
+}
+
+/** `ignore` may be empty: on `use: one-way-door` that opts out of the default safe set. */
+function ignoreGlobs(v: unknown, where: string): string[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.some((g) => typeof g !== "string" || g === "")) {
+    throw new ConfigError(`${where}: "ignore" must be a list of glob strings`);
   }
   return v as string[];
 }
@@ -114,7 +123,7 @@ function satisfiedBy(v: unknown, where: string): SatisfiedBy[] {
   });
 }
 
-const DECLARATIVE_KEYS = new Set(["id", "name", "question", "true", "false", "threshold", "applies_to", "satisfied_by", "why", "fix", "probes"]);
+const DECLARATIVE_KEYS = new Set(["id", "name", "question", "true", "false", "threshold", "applies_to", "ignore", "satisfied_by", "why", "fix", "probes"]);
 const KEBAB = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function declarative(o: Obj, where: string): DeclarativeSpec {
@@ -134,6 +143,7 @@ function declarative(o: Obj, where: string): DeclarativeSpec {
     whenFalse: str(o, "false", where),
     threshold,
     appliesTo: globs(o.applies_to, where),
+    ignore: ignoreGlobs(o.ignore, where),
     satisfiedBy: satisfiedBy(o.satisfied_by, where),
     why: str(o, "why", where),
     fix: str(o, "fix", where),
@@ -141,7 +151,7 @@ function declarative(o: Obj, where: string): DeclarativeSpec {
   };
 }
 
-const CLASSIFIER_KEYS = new Set(["id", "name", "classify", "applies_to"]);
+const CLASSIFIER_KEYS = new Set(["id", "name", "classify", "applies_to", "ignore"]);
 const CLASSIFY_KEYS = new Set(["question", "levels"]);
 const LEVEL_KEYS = new Set(["id", "means"]);
 const LEVEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -187,6 +197,7 @@ function classifier(o: Obj, where: string): ClassifierSpec {
     question: str(o.classify, "question", `${where}: classify`),
     levels: classifierLevels(o.classify.levels, `${where}: classify`),
     appliesTo: globs(o.applies_to, where),
+    ignore: ignoreGlobs(o.ignore, where),
   };
 }
 
@@ -309,7 +320,7 @@ export function parseGateConfig(text: string, defaults: BuiltinDefaults): { judg
       }
       const built = builtinById(
         String(entry.use),
-        { confidence_threshold: ct as number | undefined, applies_to: globs(entry.applies_to, where), probes: builtinProbes(entry.probes, where) },
+        { confidence_threshold: ct as number | undefined, applies_to: globs(entry.applies_to, where), ignore: ignoreGlobs(entry.ignore, where), probes: builtinProbes(entry.probes, where) },
         defaults,
       );
       if (!built) throw new ConfigError(`${where}: unknown built-in (known: ${BUILTIN_IDS.join(", ")})`);
