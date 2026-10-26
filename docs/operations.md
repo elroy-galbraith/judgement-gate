@@ -10,7 +10,8 @@
 
 - Webhook is acknowledged with 202 immediately; work runs in `ctx.waitUntil`, so GitHub's 10s timeout never applies.
 - Handled actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, and `edited` only when title or body changed. Drafts are ignored (see [below](#what-is-deliberately-not-evaluated)). `merge_group` `checks_requested` is answered without evaluating (see [Merge queue](#merge-queue)).
-- Jev error, bad response, or timeout (`JEV_TIMEOUT_MS`, default 2500) gives conclusion `neutral` titled `[Audit Degraded]`. It fails open, as does any other error once the check run exists (see [Fail-open](#fail-open-behaviour)).
+- A Jev 429, 5xx or network error is tried once more after a short random pause. Both attempts and the pause share the one `JEV_TIMEOUT_MS` budget (default 2500), so a retry never makes the check slower than that.
+- Jev error, bad response, or timeout (`JEV_TIMEOUT_MS`, default 2500) gives conclusion `neutral` titled `[Audit Degraded]`. A `choice` answer that is not one of the offered keys is a bad response (ignoring case and surrounding space); a classifier judgement just reports no level instead. It fails open, as does any other error once the check run exists (see [Fail-open](#fail-open-behaviour)).
 - When all applicable judgements pass, an existing gate comment is updated in place, clearing its remediation text and hidden failing instructions. The passing note never creates a new comment; human-review routing comments keep their existing behaviour. Shadow-mode failures still show remediation, and degraded evaluations leave existing comments unchanged. A comment API failure adds a diagnostic to the check summary without changing the verdict.
 - Diff sent to Jev is capped at 50KB, with migrations, SQL, manifests, infra config and models first.
 - Jev contract: `POST /api/alpha/decisions` on OpenRouter, model `typesafe/jev-1.14`. This is an alpha API and may change.

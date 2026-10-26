@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aggregate } from "../src/aggregate";
 import { renderComment } from "../src/comment";
-import { buildRequest, evaluate } from "../src/jev";
+import { buildRequest, evaluate, JevTimeout } from "../src/jev";
 import type { Judgement, JudgementVerdict, PrContext } from "../src/types";
 
 const pr: PrContext = { title: "t", body: "b", baseBranch: "main", headSha: "abc", files: [], patchExtract: "" };
@@ -88,5 +88,82 @@ describe("jev answer validation", () => {
     await expect(evaluate(pr, [choice], cfg, jevReturning({ "c.k": { choice: "A", confidence: "high" } }))).rejects.toThrow(
       "missing expected answers",
     );
+  });
+});
+
+const choiceJudgement = (optional = false): Judgement => ({
+  ...stub("c"),
+  optionalAnswers: optional,
+  questions: { k: { type: "choice", instructions: "pick", criteria: { TYPE_1: "a", TYPE_2: "b" } } },
+});
+
+describe("jev choice answers", () => {
+  it("rejects a choice that is not one of the offered keys", async () => {
+    await expect(evaluate(pr, [choiceJudgement()], cfg, jevReturning({ "c.k": { choice: "TYPE_3", confidence: 0.5 } }))).rejects.toThrow(
+      "missing expected answers (c.k)",
+    );
+  });
+  it("hands on the offered key for a choice that differs only in case or space", async () => {
+    const out = await evaluate(pr, [choiceJudgement()], cfg, jevReturning({ "c.k": { choice: " type_1 ", confidence: 0.5 } }));
+    expect(out.c.k.choice).toBe("TYPE_1");
+  });
+  it("leaves an unoffered choice out when the judgement tolerates missing answers", async () => {
+    const out = await evaluate(pr, [choiceJudgement(true)], cfg, jevReturning({ "c.k": { choice: "TYPE_3" } }));
+    expect(out.c).toEqual({});
+  });
+});
+
+describe("jev retry", () => {
+  const retryCfg = { ...cfg, retryDelayMs: 0 };
+  const ok = () => new Response(JSON.stringify({ answers: { "a.q": { noul: 0.2 } } }), { status: 200 });
+  const sequence = (...steps: (() => Response | Promise<Response>)[]) => {
+    const calls = { n: 0 };
+    const fn = (async () => {
+      const step = steps[Math.min(calls.n, steps.length - 1)];
+      calls.n++;
+      return step();
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  };
+
+  it.each([429, 500, 503])("a %i then a 200 succeeds on the second attempt", async (status) => {
+    const { fn, calls } = sequence(() => new Response("busy", { status }), ok);
+    const out = await evaluate(pr, [stub("a")], retryCfg, fn);
+    expect(out.a.q.noul).toBe(0.2);
+    expect(calls.n).toBe(2);
+  });
+  it("a network error then a 200 succeeds on the second attempt", async () => {
+    const { fn, calls } = sequence(() => {
+      throw new TypeError("network down");
+    }, ok);
+    await evaluate(pr, [stub("a")], retryCfg, fn);
+    expect(calls.n).toBe(2);
+  });
+  it("tries only twice, then reports the last status", async () => {
+    const { fn, calls } = sequence(() => new Response("busy", { status: 503 }));
+    await expect(evaluate(pr, [stub("a")], retryCfg, fn)).rejects.toThrow("Jev -> 503 busy");
+    expect(calls.n).toBe(2);
+  });
+  it("does not retry a 400 or a 401", async () => {
+    for (const status of [400, 401]) {
+      const { fn, calls } = sequence(() => new Response("no", { status }));
+      await expect(evaluate(pr, [stub("a")], retryCfg, fn)).rejects.toThrow(`Jev -> ${status}`);
+      expect(calls.n).toBe(1);
+    }
+  });
+  it("a timeout during the retry is still reported as a timeout, within the original budget", async () => {
+    const hang = (_url: string, init: RequestInit) =>
+      new Promise<Response>((_res, rej) => init.signal!.addEventListener("abort", () => rej(new Error("aborted"))));
+    let n = 0;
+    const fn = (async (url: string, init: RequestInit) => (n++ === 0 ? new Response("busy", { status: 503 }) : hang(url, init))) as unknown as typeof fetch;
+    const start = Date.now();
+    await expect(evaluate(pr, [stub("a")], { ...retryCfg, timeoutMs: 60 }, fn)).rejects.toBeInstanceOf(JevTimeout);
+    expect(n).toBe(2);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+  it("a pause longer than the budget times out instead of retrying late", async () => {
+    const { fn, calls } = sequence(() => new Response("busy", { status: 503 }), ok);
+    await expect(evaluate(pr, [stub("a")], { ...cfg, timeoutMs: 30, retryDelayMs: 5000 }, fn)).rejects.toBeInstanceOf(JevTimeout);
+    expect(calls.n).toBe(1);
   });
 });
