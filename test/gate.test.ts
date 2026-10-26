@@ -132,6 +132,8 @@ function fakeNet(jev: () => Response | Promise<Response>, existingComments: { id
   const calls: { method: string; url: string; body?: any }[] = [];
   const comments = existingComments.map((comment) => ({ ...comment }));
   let nextCommentId = Math.max(0, ...comments.map((comment) => comment.id)) + 1;
+  // Check runs already on GitHub, so a second event on the same commit can find the first one's run.
+  const checkRuns: { id: number; name: string; head_sha: string; app: { id: number } }[] = [];
   const fetchFn = (async (input: any, init: any = {}) => {
     const url = String(input);
     const method = init.method ?? "GET";
@@ -140,7 +142,16 @@ function fakeNet(jev: () => Response | Promise<Response>, existingComments: { id
     const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status });
     if (url.includes("jev.test")) return jev();
     if (url.endsWith("/access_tokens")) return json({ token: "tok" }, 201);
-    if (url.endsWith("/check-runs")) return json({ id: 55 }, 201);
+    const listed = url.match(/\/commits\/([^/]+)\/check-runs\?(.*)$/);
+    if (listed && method === "GET") {
+      const name = new URLSearchParams(listed[2]).get("check_name");
+      const runs = checkRuns.filter((r) => r.head_sha === listed[1] && r.name === name);
+      return json({ total_count: runs.length, check_runs: runs });
+    }
+    if (url.endsWith("/check-runs")) {
+      checkRuns.push({ id: 55, name: body.name, head_sha: body.head_sha, app: { id: 123 } });
+      return json({ id: 55 }, 201);
+    }
     if (url.includes("/check-runs/55")) return json({});
     if (url.includes("/pulls/7/files")) return json([{ filename: "src/a.ts", status: "modified", patch: "+x" }]);
     if (url.includes("/issues/7/comments") && method === "GET") return json(comments);
@@ -157,7 +168,7 @@ function fakeNet(jev: () => Response | Promise<Response>, existingComments: { id
     }
     return json({ error: "unexpected " + url }, 500);
   }) as typeof fetch;
-  return { calls, comments, fetchFn };
+  return { calls, comments, checkRuns, fetchFn };
 }
 
 const finalCheck = (calls: any[]) => calls.filter((c) => c.method === "PATCH" && c.url.includes("/check-runs/55")).at(-1)?.body;
@@ -642,5 +653,83 @@ describe("installation token cache", () => {
     expect(await installationToken(env, 301, fetchFn, t0 + 60_000)).toBe("tok-for-301");
     expect(await installationToken(env, 302, fetchFn, t0 + 60_000)).toBe("tok-for-302");
     expect(seenUrls).toHaveLength(2);
+  });
+});
+
+describe("one check run per commit (issue #3)", () => {
+  const posts = (calls: { method: string; url: string }[]) => calls.filter((c) => createsCheck(c.url, c.method));
+
+  it("two events on one SHA create one check run and reuse it", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    await processPullRequest(prEvent({ action: "edited" }), env, net.fetchFn, noWait);
+    expect(posts(net.calls)).toHaveLength(1);
+    expect(net.checkRuns).toHaveLength(1);
+    // The reused run is put back in progress before it is completed again.
+    const reopened = net.calls.find((c) => c.method === "PATCH" && c.url.includes("/check-runs/55") && c.body?.status === "in_progress");
+    expect(reopened?.body.output.title).toBe("Evaluating change");
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
+  it("editing the PR five times still leaves one check run", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    for (let i = 0; i < 5; i++) await processPullRequest(prEvent({ action: "edited" }, `body ${i}`), env, net.fetchFn, noWait);
+    expect(net.checkRuns).toHaveLength(1);
+  });
+
+  it("a new head SHA gets its own check run", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    const next = prEvent({ action: "synchronize" });
+    next.pull_request.head.sha = "def";
+    await processPullRequest(next, env, net.fetchFn, noWait);
+    expect(posts(net.calls)).toHaveLength(2);
+  });
+
+  it("only looks up check runs by our name, on the PR head SHA", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    const lookup = net.calls.find((c) => c.method === "GET" && c.url.includes("/commits/abc/check-runs"));
+    expect(lookup?.url).toContain("check_name=judgement-gate");
+  });
+
+  it("does not adopt a same-named check run owned by another app", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    net.checkRuns.push({ id: 77, name: "judgement-gate", head_sha: "abc", app: { id: 999 } });
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    expect(posts(net.calls)).toHaveLength(1);
+    expect(net.calls.some((c) => c.url.includes("/check-runs/77"))).toBe(false);
+  });
+
+  it("falls back to creating a check run when the lookup fails", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    const lookupDown = failing(net, (u, m) => m === "GET" && u.includes("/commits/abc/check-runs"));
+    await processPullRequest(prEvent(), env, lookupDown, noWait);
+    expect(posts(net.calls)).toHaveLength(1);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+  });
+
+  it("retries a failed reopen of the existing check run", async () => {
+    clearInstallationTokenCache();
+    const env = await makeEnv();
+    const net = fakeNet(answer);
+    await processPullRequest(prEvent(), env, net.fetchFn, noWait);
+    const reopenDown = failing(net, (u, m) => m === "PATCH" && u.includes("/check-runs/55"), 2);
+    await processPullRequest(prEvent({ action: "edited" }), env, reopenDown, noWait);
+    expect(posts(net.calls)).toHaveLength(1);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
   });
 });
