@@ -2,9 +2,11 @@
 
 ## Rollout modes
 
-`MODE` in `wrangler.toml`:
-- `shadow` (default): the check always passes and the title reads `[Shadow] <verdict>`. Use it to calibrate.
+`MODE` in `wrangler.toml` supplies the default for judgements that do not set their own `mode`:
+- `shadow` (default): findings do not block. An all-shadow evaluation has a `[Shadow]` title; request-wide outages remain neutral. Use it to calibrate.
 - `enforce`: real success/failure. Making it block merges is done on the GitHub side with an organization ruleset that requires `judgement-gate`.
+
+A judgement may override either default with `mode: shadow` or `mode: enforce`. Each summary line shows the effective mode; see [configuration](configuration.md#repository-scope-and-judgement-modes).
 
 ## Behaviour notes
 
@@ -20,18 +22,18 @@
 
 Answers are validated per judgement. If a required answer is missing or malformed, only that judgement is degraded; its decision rule is skipped. Other judgements still decide from their validated answers in the same request. Check summaries list each pass, failure, and degraded judgement, including the affected question keys. Analytics records each judgement's own outcome.
 
-| Applicable judgement outcomes | Enforce-mode check conclusion |
+| Applicable judgement outcomes | Check conclusion |
 |---|---|
-| Any healthy judgement fails, even alongside degraded judgements | `failure`, preserving the healthy failure reason and remedy |
-| All pass | `success` |
-| No failures, but at least one degraded judgement | `neutral`, `[Audit Degraded]` |
+| Any healthy enforced judgement fails, even alongside degraded judgements | `failure`, preserving the healthy failure reason and remedy |
+| All enforced judgements pass; shadow findings may remain | `success` |
+| No enforced failures, but at least one degraded enforced judgement | `neutral`, `[Audit Degraded]` |
 | No applicable judgements | `success`, no model request |
 
-In shadow mode, these completed evaluations publish `success` and describe the underlying conclusion in the summary. Request-wide errors (HTTP errors, network failures, timeouts, invalid JSON or an unusable response envelope) retain the existing `neutral` outage path in either mode.
+Only enforced judgements affect the completed evaluation: any enforced failure wins, otherwise incomplete enforced coverage gives neutral. Shadow failures and partial degradation remain visible but do not change the check conclusion. Request-wide errors (HTTP errors, network failures, timeouts, invalid JSON or an unusable response envelope) retain the existing `neutral` outage path in either mode.
 
 `optionalAnswers` is unchanged: malformed or missing optional answers are omitted and the judgement's decision rule receives the remaining answers. A classifier can therefore still report “no level reported.”
 
-Routing continues to match healthy judgement results and changed files. If no rule matches and a rule targets a degraded judgement, routing is unavailable because the missing result could require a human. Degradation alone never adds a review label or changes a healthy failure into a pass. Comment writes remain best-effort; comments are created only for a healthy failure or human routing, and existing comments can be updated to explain incomplete coverage.
+Routing continues to match healthy judgement results and changed files. If no rule matches and a rule targets a degraded judgement, routing is unavailable because the missing result could require a human. Degradation alone never adds a review label or changes a healthy enforced failure into a pass. Comment writes remain best-effort; comments are created only for a healthy failure or human routing, and existing comments can be updated to explain incomplete coverage.
 
 ## Fail-open behaviour
 
@@ -73,12 +75,12 @@ This works in `shadow` and `enforce` mode alike, and it needs the app subscribed
 
 1. **Calibrate in shadow.** Run in `shadow` for about two weeks first ([calibration.md](calibration.md)). Look at the share of `degraded` evaluations: it is the fraction of PRs the gate cannot judge, and it should be small before anyone depends on the gate.
 2. **Install and subscribe.** The app must be installed on every repo in the ruleset, with the **Pull request** event, plus **Merge group** if a merge queue is used. A repo in the ruleset where the app is not installed can never merge, because the required check never appears.
-3. **Make the check required while still in shadow.** In the organisation ruleset, target one willing repo, add the required status check `judgement-gate`, and choose this GitHub App as its source so no other app or status can supply a passing result. Shadow mode always reports `success`, so this step only proves that the check shows up on every PR (including a queued one). Open a PR, a draft that you mark ready, and a queued PR to see it.
+3. **Make the check required while still in shadow.** In the organisation ruleset, target one willing repo, add the required status check `judgement-gate`, and choose this GitHub App as its source so no other app or status can supply a passing result. With no per-judgement enforce overrides, completed shadow evaluations report `success`, so this step only proves that the check shows up on every PR (including a queued one). Open a PR, a draft that you mark ready, and a queued PR to see it.
 4. **Set a bypass list before enforcing.** Give a small admin group, or a break-glass team, bypass on the ruleset ("always" or "for pull requests only"). It is the way out of the two cases in [When the check cannot be completed](#when-the-check-cannot-be-completed).
 5. **Flip to enforce.** Set `MODE = "enforce"` and deploy. Judge it on that one repo for a while before widening the ruleset's targets repo by repo.
 6. **Watch.** Look for PRs stuck at "Expected" and for `judgement-gate failed` lines in the Worker logs; either means a check run was never created.
 
-**Backing out**, fastest first: set `MODE = "shadow"` and deploy (every new check passes); remove `judgement-gate` from the ruleset's required checks, or set the ruleset to disabled (merges are unblocked at once, whatever the Worker does).
+**Backing out**, fastest first: set `MODE = "shadow"`, remove any per-judgement `mode: enforce` overrides, and deploy (completed evaluations pass); remove `judgement-gate` from the ruleset's required checks, or set the ruleset to disabled (merges are unblocked at once, whatever the Worker does).
 
 ## End-to-end run
 

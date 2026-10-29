@@ -342,3 +342,123 @@ describe("multiple judgements", () => {
     expect(fallbackMd).not.toContain("deadbeef1234");
   });
 });
+
+describe("repository scope and judgement modes", () => {
+  it("skips a built-in scoped to another repo without calling Jev", async () => {
+    const net = fakeNet({ config: { status: 200, body: 'judgements:\n  - use: one-way-door\n    repos: [other]\n' }, answers: type1 });
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(jevBody(net.calls)).toBeUndefined();
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+    expect(finalCheck(net.calls).output.summary).toContain("No applicable judgements");
+  });
+
+  it("keeps a shadow failure visible while an enforced judgement passes", async () => {
+    const config = CONFIG.replace('    name: Public API contract change', '    mode: shadow\n    name: Public API contract change');
+    const net = fakeNet({ config: { status: 200, body: config }, files: apiFiles, answers: { ...benign, "public-api-contract.q": { noul: 0.9 } } });
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+    expect(finalCheck(net.calls).output.summary).toContain("[shadow]");
+    expect(postedComment(net.calls)).toContain("Public API contract change");
+    expect(postedComment(net.calls)).toContain("does not block");
+  });
+});
+
+describe("scope and mode integration", () => {
+  it.each(["r", "?", "r*", "*"])("matches target repo glob %s even on a fork PR", async (pattern) => {
+    const config = `judgements:\n  - use: one-way-door\n    repos: ['${pattern}']\n`;
+    const ev = prEvent();
+    ev.pull_request.head.repo = { name: "other-fork", owner: { login: "forker" }, fork: true };
+    const net = fakeNet({ config: { status: 200, body: config }, answers: type1 });
+    await processPullRequest(ev, await makeEnv(), net.fetchFn);
+    expect(jevBody(net.calls).questions.is_one_way_boundary_mutation).toBeDefined();
+    expect(finalCheck(net.calls).conclusion).toBe("failure");
+  });
+
+  it("requires the repository AND file filters to match", async () => {
+    const config = API_ONLY.replace('    name:', '    repos: [r]\n    name:');
+    const net = fakeNet({ config: { status: 200, body: config }, answers: {} });
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(jevBody(net.calls)).toBeUndefined();
+  });
+
+  it("removes only the out-of-scope judgement's questions from a shared Jev request", async () => {
+    const config = CONFIG.replace('    name:', '    repos: [elsewhere]\n    name:');
+    const net = fakeNet({ config: { status: 200, body: config }, answers: benign, files: apiFiles });
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    const questions = jevBody(net.calls).questions;
+    expect(questions.is_one_way_boundary_mutation).toBeDefined();
+    expect(questions["public-api-contract.q"]).toBeUndefined();
+    expect(finalCheck(net.calls).output.summary).not.toContain("Public API contract change");
+  });
+
+  it.each(["shadow", undefined])("explicit enforce overrides global %s", async (mode) => {
+    const config = 'judgements:\n  - use: one-way-door\n    mode: enforce\n';
+    const net = fakeNet({ config: { status: 200, body: config }, answers: type1 });
+    await processPullRequest(prEvent(), await makeEnv({ MODE: mode }), net.fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe("failure");
+    expect(finalCheck(net.calls).output.title).not.toContain("[Shadow]");
+    expect(finalCheck(net.calls).output.summary).toContain("[enforce]");
+    expect(postedComment(net.calls)).toContain('"mode":"enforce"');
+  });
+
+  it("records effective modes and keeps review routing independently enforced", async () => {
+    const points: { blobs?: string[] }[] = [];
+    const config = CONFIG.replace('    name:', '    mode: shadow\n    name:') + '\nrouting:\n  include_defaults: false\n  human_when:\n    - judgement: public-api-contract\n';
+    const net = fakeNet({ config: { status: 200, body: config }, files: apiFiles, answers: { ...benign, "public-api-contract.q": { noul: 0.9 } } });
+    await processPullRequest(prEvent(), await makeEnv({ ANALYTICS: { writeDataPoint: p => void points.push(p) } }), net.fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+    expect(points.filter(p => p.blobs?.[0] === "evaluation").map(p => p.blobs?.slice(2, 5))).toEqual([
+      ["one-way-door", "enforce", "passed"], ["public-api-contract", "shadow", "flagged"],
+    ]);
+    expect(net.calls.some(c => c.url.endsWith('/labels') && c.method === 'POST')).toBe(true);
+    const md = postedComment(net.calls)!;
+    const block = JSON.parse(md.match(/<!-- judgement-gate:v1 (\{.*\}) -->/)![1]);
+    expect(block.mode).toBe("enforce");
+    expect(block.failing[0]).toMatchObject({ id: "public-api-contract", mode: "shadow" });
+    expect(md).not.toContain("all applicable judgements passed");
+  });
+
+  it("records overridden modes on the request-wide outage path", async () => {
+    const points: { blobs?: string[] }[] = [];
+    const config = 'judgements:\n  - use: one-way-door\n    mode: enforce\n';
+    const net = fakeNet({ config: { status: 200, body: config }, answers: {} });
+    const fetchFn = ((input, init) => String(input).includes('jev.test') ? Promise.resolve(new Response('down', { status: 503 })) : net.fetchFn(input, init)) as typeof fetch;
+    await processPullRequest(prEvent(), await makeEnv({ MODE: 'shadow', ANALYTICS: { writeDataPoint: p => void points.push(p) } }), fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe('neutral');
+    expect(points[0].blobs?.slice(2, 5)).toEqual(['one-way-door', 'enforce', 'degraded']);
+  });
+});
+
+describe("mixed-mode failures and partial answers", () => {
+  const config = CONFIG.replace('    name:', '    mode: shadow\n    name:');
+  it("keeps both failures in the comment while only the enforced failure supplies the check reason", async () => {
+    const net = fakeNet({ config: { status: 200, body: config }, files: apiFiles, answers: { ...type1, 'public-api-contract.q': { noul: 0.9 } } });
+    const v = await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(v).toMatchObject({ conclusion: 'failure', reason: 'type1_no_adr' });
+    expect(finalCheck(net.calls).conclusion).toBe('failure');
+    const md = postedComment(net.calls)!;
+    const block = JSON.parse(md.match(/<!-- judgement-gate:v1 (\{.*\}) -->/)![1]);
+    expect(block.failing.map((f: { id: string; mode: string }) => [f.id, f.mode])).toEqual([
+      ['one-way-door', 'enforce'], ['public-api-contract', 'shadow'],
+    ]);
+    expect(md).toContain('**Mode:** enforce');
+    expect(md).toContain('**Mode:** shadow');
+  });
+
+  it("a missing shadow answer stays visible without neutralizing an enforced pass", async () => {
+    const net = fakeNet({ config: { status: 200, body: config }, files: apiFiles, answers: benign });
+    const v = await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(v.conclusion).toBe('success');
+    expect(finalCheck(net.calls).conclusion).toBe('success');
+    expect(finalCheck(net.calls).output.summary).toContain('Public API contract change (Missing or malformed answers: public-api-contract.q) [shadow]');
+    expect(finalCheck(net.calls).output.title).not.toContain('judgements passed');
+  });
+
+  it("a missing enforced answer keeps the check neutral despite a shadow failure", async () => {
+    const net = fakeNet({ config: { status: 200, body: config }, files: apiFiles, answers: { 'public-api-contract.q': { noul: 0.9 } } });
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(finalCheck(net.calls).conclusion).toBe('neutral');
+    expect(postedComment(net.calls)).toContain('does not block the check');
+    expect(postedComment(net.calls)).toContain('Audit degraded');
+  });
+});

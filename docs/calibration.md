@@ -13,7 +13,7 @@ Only ids, numbers and enum strings are stored. Never the PR title, body, diff or
 | `index1`, `blob2` | `owner/repo` |
 | `blob1` | `evaluation`, `feedback` or `routing` |
 | `blob3` | judgement id (empty for `routing`) |
-| `blob4` | `shadow` or `enforce` (for `routing`, the routing mode) |
+| `blob4` | For evaluations, the judgement's effective `shadow` or `enforce` mode. For `routing`, the routing mode; for feedback, the global default at reply time (no config lookup). |
 | `blob5` | `flagged`, `passed`, `cleared` (over threshold but satisfied by an ADR or `satisfied_by` rule), `degraded` (Jev failed), `false_positive`; for `routing`: `human`, `agent` or `unavailable` |
 | `blob6` | verdict reason, such as `type1_no_adr`; for `routing`, the reasons joined with `; ` (at most 256 characters), such as `one-way-door flagged; files: migrations/**` |
 | `blob7` | commenter's `author_association` (feedback only) |

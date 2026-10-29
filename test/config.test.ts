@@ -578,3 +578,30 @@ describe("satisfied_by answers (issue #22)", () => {
     expect(() => parseConfig(withAnswers({ bogus: 1 }), defaults)).toThrow(/pr_body_matches, file_added or answers/);
   });
 });
+
+describe("repos and mode metadata", () => {
+  const entries = [
+    { use: "one-way-door" },
+    { id: "custom", name: "Custom", question: "Risk?", true: "yes", false: "no", threshold: 0.6,
+      satisfied_by: [{ pr_body_matches: "^Plan:" }], why: "risk", fix: "add Plan:" },
+    { id: "severity", name: "Severity", classify: { question: "Impact?", levels: [{ id: "P0", means: "high" }, { id: "P3", means: "low" }] } },
+  ];
+  it.each(entries)("retains scope and mode for $use $id", (entry) => {
+    for (const mode of ["shadow", "enforce"]) {
+      const [j] = parseConfig(JSON.stringify({ judgements: [{ ...entry, repos: ["cac-api", "service-*"], mode }] }), defaults);
+      expect(j.repos).toEqual(["cac-api", "service-*"]);
+      expect(j.mode).toBe(mode);
+    }
+    const [j] = parseConfig(JSON.stringify({ judgements: [entry] }), defaults);
+    expect(j.repos).toBeUndefined();
+    expect(j.mode).toBeUndefined();
+  });
+  it.each(entries)("rejects invalid scope and mode for $use $id", (entry) => {
+    for (const repos of [[], "cac-api", null, [1], [""], ["   "], {}]) {
+      expect(() => parseConfig(JSON.stringify({ judgements: [{ ...entry, repos }] }), defaults)).toThrow('"repos"');
+    }
+    for (const mode of ["audit", "Shadow", "", null, true, 1, []]) {
+      expect(() => parseConfig(JSON.stringify({ judgements: [{ ...entry, mode }] }), defaults)).toThrow('"mode"');
+    }
+  });
+});

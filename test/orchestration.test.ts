@@ -215,3 +215,23 @@ describe("jev retry", () => {
     expect(calls.n).toBe(1);
   });
 });
+
+describe("mode-aware aggregation", () => {
+  const shadow = (r: JudgementResult): JudgementResult => ({ ...r, judgement: { ...r.judgement, mode: "shadow" } });
+  it("ignores shadow failures when choosing the enforced failure reason", () => {
+    expect(aggregate([shadow(fail(stub("trial"))), fail(stub("required"))])).toMatchObject({ conclusion: "failure", reason: "required_bad" });
+  });
+  it("does not claim all judgements passed with shadow findings", () => {
+    const v = aggregate([pass(stub("required")), shadow(fail(stub("trial")))]);
+    expect(v.conclusion).toBe("success");
+    expect(v.summary).not.toContain("judgements passed");
+  });
+  it("keeps enforced incomplete coverage neutral despite a shadow failure", () => {
+    expect(aggregate([degraded, shadow(fail(stub("trial")))])).toMatchObject({ conclusion: "neutral", reason: "degraded" });
+  });
+  it("does not let degraded shadow coverage neutralize an enforced pass or failure", () => {
+    expect(aggregate([shadow(degraded), pass(stub("required"))]).conclusion).toBe("success");
+    expect(aggregate([shadow(degraded), fail(stub("required"))]).conclusion).toBe("failure");
+    expect(aggregate([shadow(degraded)]).conclusion).toBe("success");
+  });
+});

@@ -18,14 +18,23 @@ export function isDecided(result: JudgementResult): result is JudgementResult & 
   return result.verdict.conclusion !== "neutral";
 }
 
-/** Any failing judgement fails the gate; the first failure supplies the reason. */
+/**
+ * Only enforced failures block; raw verdicts stay intact for comments and routing.
+ * Orchestration supplies resolved modes. An omitted mode retains the original aggregate semantics (enforce).
+ */
 export function aggregate(results: JudgementResult[]): Verdict {
   if (results.length === 0) return { conclusion: "success", reason: "no_applicable", summary: "No applicable judgements" };
-  const failed = results.filter((r) => r.verdict.conclusion === "failure");
+  const enforced = results.filter((r) => r.judgement.mode !== "shadow");
+  const failed = enforced.filter((r) => r.verdict.conclusion === "failure");
   if (failed.length === 0) {
-    if (results.some((r) => r.verdict.conclusion === "neutral")) {
+    if (enforced.some((r) => r.verdict.conclusion === "neutral")) {
       return { conclusion: "neutral", reason: "degraded", summary: "[Audit Degraded]" };
     }
+    const shadowIssues = results.filter((r) => r.judgement.mode === "shadow" && r.verdict.conclusion !== "success");
+    if (shadowIssues.length > 0) return {
+      conclusion: "success", reason: "shadow_findings",
+      summary: `No enforced failures; ${shadowIssues.length} shadow judgement${shadowIssues.length === 1 ? "" : "s"} need${shadowIssues.length === 1 ? "s" : ""} attention`,
+    };
     const first = results[0].verdict;
     return { conclusion: "success", reason: first.reason, summary: results.length === 1 ? first.summary : `${results.length} judgements passed` };
   }
