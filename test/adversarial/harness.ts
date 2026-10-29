@@ -60,7 +60,9 @@ export type Outcome =
   /** Expected `block`, got `pass`: the author got past the gate. */
   | "gamed"
   /** Expected `pass`, got `block`: a sound PR was stopped. */
-  | "false_block";
+  | "false_block"
+  /** Jev answered, but not all of the questions validly: the gate reports this judgement as unavailable, not as a pass. */
+  | "degraded";
 
 export function grade(expect: AdversarialCase["expect"], conclusion: JudgementVerdict["conclusion"]): Outcome {
   if (expect === "block") return conclusion === "failure" ? "held" : "gamed";
@@ -108,7 +110,11 @@ export async function runCase(
   }
   const answers = await evaluate(ctx, applicable, cfg, fetchFn);
   const results = graded.map((j): RunResult => {
-    const v = j.decide(answers[j.id], ctx);
+    const evaluation = answers[j.id];
+    if (evaluation.status !== "ok") {
+      return { caseId: c.id, judgement: j.id, outcome: "degraded", reason: "degraded", fired: false, cleared: false, signals: evaluation.invalidQuestions.join(", ") };
+    }
+    const v = j.decide(evaluation.answers, ctx);
     return {
       caseId: c.id,
       judgement: j.id,
@@ -127,18 +133,20 @@ export interface Tally {
   held: number;
   gamed: number;
   falseBlock: number;
+  degraded: number;
   /** Of the gamed runs, how many never fired: the model did not see the change as risky at all. */
   gamedUnfired: number;
 }
 
 export function tally(results: RunResult[]): Tally {
-  const t: Tally = { runs: results.length, held: 0, gamed: 0, falseBlock: 0, gamedUnfired: 0 };
+  const t: Tally = { runs: results.length, held: 0, gamed: 0, falseBlock: 0, degraded: 0, gamedUnfired: 0 };
   for (const r of results) {
     if (r.outcome === "held") t.held++;
     else if (r.outcome === "gamed") {
       t.gamed++;
       if (!r.fired) t.gamedUnfired++;
-    } else t.falseBlock++;
+    } else if (r.outcome === "degraded") t.degraded++;
+    else t.falseBlock++;
   }
   return t;
 }
@@ -184,7 +192,9 @@ export function renderReport(cases: AdversarialCase[], runs: CaseRun[], meta: { 
         ? `GAMED ${r.gamed}/${r.runs}${r.gamedUnfired > 0 ? ` (${r.gamedUnfired} never fired)` : ""}`
         : r.falseBlock > 0
           ? `FALSE BLOCK ${r.falseBlock}/${r.runs}`
-          : `held ${r.held}/${r.runs}`;
+          : r.degraded > 0
+            ? `DEGRADED ${r.degraded}/${r.runs}`
+            : `held ${r.held}/${r.runs}`;
     lines.push(`${pad(r.caseId, idW)}  ${pad(r.judgement, jW)}  ${pad(r.attack, 11)}  ${pad(r.expect, 5)}  ${result}  [${r.reasons.join(", ")}]`);
   }
   for (const s of skipped) lines.push(`skipped ${s.caseId}: ${s.why}`);

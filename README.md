@@ -124,4 +124,4 @@ For each PR event the Worker sends Jev (through OpenRouter) the PR title and bod
 
 ## Status
 
-Alpha. The Jev API (`/api/alpha/decisions`) may change, Jev's confidence score is not a probability, and the gate fails open: if Jev is unavailable the check is `neutral` and the PR is not blocked. Evaluations and false-positive replies are logged to Workers Analytics Engine (optional) so shadow-mode thresholds can be tuned from data; see [docs/calibration.md](docs/calibration.md).
+Alpha. The Jev API (`/api/alpha/decisions`) may change, Jev's confidence score is not a probability, and the gate fails open: if Jev is unavailable the check is `neutral` and the PR is not blocked. Missing or malformed required answers degrade only their own judgement: a healthy failure still fails the gate in enforce mode; with no failures, incomplete coverage is `neutral`. See [partial answer degradation](docs/operations.md#partial-answer-degradation). Evaluations and false-positive replies are logged to Workers Analytics Engine (optional) so shadow-mode thresholds can be tuned from data; see [docs/calibration.md](docs/calibration.md).

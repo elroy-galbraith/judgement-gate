@@ -143,7 +143,7 @@ export interface Judgement {
   unprefixedKeys?: boolean;
   /** A classifier labels the PR and never fails it, so it never fires. Default: a yes/no judgement that can flag. */
   kind?: "classifier";
-  /** A missing or malformed answer is dropped instead of failing the whole Jev request; `decide` must cope with absent answers. */
+  /** A missing or malformed answer is dropped instead of degrading the judgement; `decide` must cope with absent answers. */
   optionalAnswers?: boolean;
   /** Every reason code `decide` can return. */
   reasons: string[];

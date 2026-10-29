@@ -97,7 +97,7 @@ describe("Jev request and answer handling", () => {
 
   it("passes a good severity answer through", async () => {
     const out = await run(answersFor({}));
-    expect(out.severity.q.choice).toBe("P0");
+    expect(out.severity).toEqual({ status: "ok", answers: { q: { choice: "P0", confidence: 0.9 } } });
   });
 
   it.each([
@@ -107,13 +107,16 @@ describe("Jev request and answer handling", () => {
     ["a non-numeric confidence", { "severity.q": { choice: "P0", confidence: "high" } }],
   ])("a %s severity answer is left out and does not fail the request", async (_n, extra) => {
     const out = await run(answersFor(extra));
-    expect(out.severity.q).toBeUndefined();
-    expect(out["one-way-door"].is_one_way_boundary_mutation.noul).toBe(0.1);
-    expect(severity().decide(out.severity, pr).reason).toBe("severity_unreported");
+    expect(out.severity).toEqual({ status: "ok", answers: {} });
+    expect(out["one-way-door"]).toMatchObject({ status: "ok", answers: { is_one_way_boundary_mutation: { noul: 0.1 } } });
+    if (out.severity.status !== "ok") throw new Error("optional judgement degraded");
+    expect(severity().decide(out.severity.answers, pr).reason).toBe("severity_unreported");
   });
 
-  it("a missing one-way-door answer still fails the request", async () => {
-    await expect(run(answersFor({ is_additive_or_isolated: undefined }))).rejects.toThrow(/missing expected answers/);
+  it("a missing one-way-door answer degrades only that judgement", async () => {
+    const out = await run(answersFor({ is_additive_or_isolated: undefined }));
+    expect(out["one-way-door"]).toEqual({ status: "degraded", invalidQuestions: ["is_additive_or_isolated"] });
+    expect(out.severity.status).toBe("ok");
   });
 });
 

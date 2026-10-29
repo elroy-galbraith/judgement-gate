@@ -107,6 +107,13 @@ describe("runCase", () => {
     expect(run.results[0]).toMatchObject({ outcome: "held", reason: "type2_no_plan" });
   });
 
+  it("reports a judgement whose answers are missing as degraded, not as held or gamed", async () => {
+    const { has_concrete_reversal_plan: _omitted, ...partial } = PLAN_OK;
+    const run = await runCase(byId("ow-ph-na"), judgements, cfg, jevReturning(partial));
+    expect(run.results[0]).toMatchObject({ judgement: "one-way-door", outcome: "degraded" });
+    expect(renderReport([byId("ow-ph-na")], [run], { model: "m", runsPerCase: 1 })).toContain("DEGRADED 1/1");
+  });
+
   it("counts a sound control that is stopped as a false block", async () => {
     const run = await runCase(byId("ow-ctl-t2-real-plan"), judgements, cfg, jevReturning({ ...PLAN_OK, has_concrete_reversal_plan: { noul: 0.05 } }));
     expect(run.results[0].outcome).toBe("false_block");

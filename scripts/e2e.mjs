@@ -283,6 +283,22 @@ const CASES = [
     },
   },
   {
+    name: "R4 same PR gets an incomplete note when its required answer is malformed",
+    scenario: 3,
+    reusePr: true,
+    answers: { is_one_way_boundary_mutation: { noul: "broken" } },
+    check(e, r, previous) {
+      e.eq("conclusion", r.check.conclusion, "neutral");
+      oneComment(e, r);
+      e.eq("comment ids", r.commentIds, previous.commentIds);
+      e.has("comment", r.comments[0], "audit incomplete");
+      e.lacks("comment", r.comments[0], "all applicable judgements passed");
+      e.lacks("comment", r.comments[0], "**Fix:**");
+      e.eq("block failing", r.block?.failing, []);
+      e.eq("block routing.route", r.block?.routing?.route, "unavailable");
+    },
+  },
+  {
     name: "5 public API break, no migration plan",
     scenario: 5,
     check(e, r) {
@@ -367,6 +383,52 @@ const CASES = [
       e.eq("block classification", r.block?.classification, undefined);
     },
   },
+  {
+    name: "F5 malformed one-way-door preserves a healthy API failure",
+    scenario: 5,
+    answers: { is_one_way_boundary_mutation: { noul: "broken" } },
+    check(e, r) {
+      e.eq("conclusion", r.check.conclusion, "failure");
+      e.has("summary", r.check.summary, "- degraded: One-way door");
+      e.has("summary", r.check.summary, "- FAIL: Public API contract change");
+      human(e, r);
+      oneComment(e, r);
+      e.has("comment", r.comments[0], "Audit degraded");
+      e.eq("block failing ids", r.block?.failing?.map(f => f.id), ["public-api-contract"]);
+    },
+  },
+  {
+    name: "F6 same PR clears API failure while one-way-door stays degraded",
+    scenario: 6,
+    reusePr: true,
+    answers: { is_one_way_boundary_mutation: { noul: "broken" } },
+    check(e, r, previous) {
+      e.eq("conclusion", r.check.conclusion, "neutral");
+      e.has("summary", r.check.summary, "- pass: Public API contract change");
+      e.has("summary", r.check.summary, "Review routing: human");
+      e.eq("label writes", r.labels, [...previous.labels, LABEL]);
+      oneComment(e, r);
+      e.eq("comment ids", r.commentIds, previous.commentIds);
+      e.has("comment", r.comments[0], "audit incomplete");
+      e.lacks("comment", r.comments[0], "passed the checks");
+      e.lacks("comment", r.comments[0], "**Fix:**");
+      e.eq("block failing", r.block?.failing, []);
+    },
+  },
+  {
+    name: "F7 missing API answer preserves a healthy one-way-door pass",
+    scenario: 6,
+    answers: { "public-api-contract.q": null },
+    check(e, r) {
+      e.eq("conclusion", r.check.conclusion, "neutral");
+      e.has("summary", r.check.summary, "- pass: One-way door");
+      e.has("summary", r.check.summary, "- degraded: Public API contract change");
+      e.has("summary", r.check.summary, "Review routing: unavailable");
+      e.eq("labels", r.labels, []);
+      noComment(e, r);
+    },
+  },
+
 ];
 
 async function main() {
@@ -458,7 +520,7 @@ async function main() {
     const sha = crypto.randomBytes(20).toString("hex");
     if (!c.reusePr) pr += 1;
     await post(`${gh}/__register`, { pr, files: scenario.files });
-    await post(`${jev}/__control`, { mode: c.mode ?? "ok", answers: scenario.jev });
+    await post(`${jev}/__control`, { mode: c.mode ?? "ok", answers: { ...scenario.jev, ...c.answers } });
 
     const payload = webhook(scenario, pr, sha, c.reusePr ? previousScenario.body : undefined);
     const res = await fetch(`${worker}/webhook`, {

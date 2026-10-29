@@ -136,3 +136,21 @@ describe("non-ok setups", () => {
     expect(r).toEqual({ route: "unavailable", reasons: ["fetch failed"], label: "custom" });
   });
 });
+
+
+describe("partial degradation", () => {
+  const degraded: JudgementResult = {
+    judgement: res("api", "x", false).judgement,
+    verdict: { conclusion: "neutral", reason: "degraded", fired: false, summary: "missing answers", invalidQuestions: ["api.q"] },
+  };
+  it("does not turn degradation into a matching judgement reason", () => {
+    expect(evaluateRouting(ok([{ judgement: "api", reason: "degraded" }]), [degraded], noFiles).route).toBe("unavailable");
+  });
+  it("preserves a human match from a healthy judgement despite another missing result", () => {
+    expect(evaluateRouting(ok([{ judgement: "api" }, { judgement: "good" }]), [degraded, res("good", "flagged", true)], noFiles))
+      .toEqual({ route: "human", reasons: ["good flagged"], label: DEFAULT_LABEL });
+  });
+  it("does not make unrelated routing rules unavailable", () => {
+    expect(evaluateRouting(ok([{ judgement: "good" }]), [degraded, res("good", "ok", false)], noFiles).route).toBe("agent");
+  });
+});
