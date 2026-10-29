@@ -129,10 +129,16 @@ export interface AgentHint {
   suggested_template?: { target: "pr_body" | "file"; path?: string; content: string };
 }
 
+export type JudgementMode = "shadow" | "enforce";
+
 /** A named question for the model, a decision rule, and a remedy that teaches the author. */
 export interface Judgement {
   id: string;
   name: string;
+  /** Globs against the target repository name; omitted means all repositories. */
+  repos?: string[];
+  /** Overrides MODE; orchestration resolves the inherited mode before evaluating. */
+  mode?: JudgementMode;
   /** Globs against changed filenames; omitted means the judgement always applies. */
   appliesTo?: string[];
   /** Changed files for which this returns true are not considered when deciding whether the judgement applies. */
