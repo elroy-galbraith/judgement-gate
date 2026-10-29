@@ -5,7 +5,7 @@ import { renderComment, renderRoutingComment } from "./comment";
 import { verifySignature } from "./crypto";
 import { assembleContext, GitHubClient, installationToken, LIST_FILES_LIMIT } from "./github";
 import { evaluate } from "./jev";
-import { appliesToFiles } from "./glob";
+import { appliesToFiles, matchesGlob } from "./glob";
 import { DEFAULT_LABEL, evaluateRouting, type RoutingResult, type RoutingSetup } from "./routing";
 import type { ChangedFile, Env, Judgement, FetchFn, IssueCommentEvent, MergeGroupEvent, PullRequestEvent, Verdict } from "./types";
 
@@ -188,7 +188,9 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     if (note) configNote = `\n\n_${note}_`;
     // A list that hit the limit may be cut off, and the files past the cut could be risky, so nothing is ignored then.
     const listComplete = files.length < LIST_FILES_LIMIT;
-    const applicable = all.filter((j) => appliesToFiles(j.appliesTo, files, listComplete ? j.ignores : undefined));
+    const applicable = all
+      .filter((j) => (!j.repos || j.repos.some((pattern) => matchesGlob(pattern, repo))) && appliesToFiles(j.appliesTo, files, listComplete ? j.ignores : undefined))
+      .map((j): Judgement => ({ ...j, mode: j.mode ?? (mode === "shadow" ? "shadow" : "enforce") }));
     evaluated = applicable;
 
     let results: JudgementResult[] = [];
@@ -229,7 +231,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
         repo: repoName,
         pr,
         judgement: judgement.id,
-        mode,
+        mode: judgement.mode!,
         outcome: v.conclusion === "neutral" ? "degraded" : v.conclusion === "failure" ? "flagged" : v.metrics?.cleared ? "cleared" : "passed",
         reason: v.reason,
         probability: v.metrics?.probability,
@@ -238,7 +240,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
         latencyMs,
       });
     }
-    const shadow = mode === "shadow";
+    const shadow = applicable.length > 0 && applicable.every((j) => j.mode === "shadow");
 
     // Routing is advisory: it never feeds `aggregate` or the check conclusion.
     const published = await publishRouting(setup, results, files, routingTarget);
@@ -267,16 +269,16 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     // A classifier's summary is its name and level, so the line shows the level alone.
     const lines = results.map((r) => {
       const shown = r.verdict.conclusion !== "neutral" && r.judgement.kind === "classifier" ? (r.verdict.classification?.level ?? "no level reported") : r.verdict.summary;
-      return `- ${r.verdict.conclusion === "neutral" ? "degraded" : r.verdict.conclusion === "success" ? "pass" : "FAIL"}: ${r.judgement.name} (${shown})`;
+      return `- ${r.verdict.conclusion === "neutral" ? "degraded" : r.verdict.conclusion === "success" ? "pass" : "FAIL"}: ${r.judgement.name} (${shown}) [${r.judgement.mode}]`;
     });
     const detail = lines.length > 0 ? `${verdict.summary}\n\n${lines.join("\n")}` : verdict.summary;
     await complete(
       owner,
       repo,
       check.id,
-      shadow ? "success" : verdict.conclusion,
+      verdict.conclusion,
       shadow ? `[Shadow] ${verdict.summary}` : verdict.summary,
-      (shadow ? `Shadow mode: would have concluded **${verdict.conclusion}**.\n\n${detail}` : detail) + routingNote + configNote + commentNote,
+      (shadow ? `Shadow mode: findings do not block the check.\n\n${detail}` : detail) + routingNote + configNote + commentNote,
     );
     return verdict;
   } catch (e) {
@@ -286,7 +288,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
         repo: repoName,
         pr,
         judgement: j.id,
-        mode,
+        mode: ("mode" in j ? j.mode : undefined) ?? mode,
         outcome: "degraded",
         reason: "degraded",
         latencyMs: Date.now() - started,

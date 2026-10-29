@@ -11,7 +11,8 @@ One line, an HTML comment (invisible when rendered). Find it with `/<!-- judgeme
 | Field | Meaning |
 |---|---|
 | `schema` | Integer, equals the `v` in the marker. Unknown higher versions: fall back to the prose. |
-| `mode` | `shadow` (check always passes, but fix it anyway) or `enforce`. |
+| `mode` | Global default, `shadow` or `enforce`. Individual judgements can override it. |
+| `failing[].mode` | Effective mode for this finding: `shadow` is non-blocking; `enforce` can fail the check. Optional additive field; for older blocks, fall back to top-level `mode`. |
 | `failing[].id`, `.name` | Judgement id and display name. |
 | `failing[].reason` | Reason code, e.g. `type1_no_adr`, `type2_no_plan`, `ambiguous`, `<id>_unsatisfied`. |
 | `failing[].probability`, `.threshold` | Model probability and flag threshold, or `null`. |
@@ -66,3 +67,7 @@ It is information only. A classifier never appears in `failing`, has nothing to 
 3. Push or edit; the gate re-runs and edits the same comment in place.
 4. If the judgement is wrong for this change, do not game it. Ask a human to reply `/judgement-gate false-positive <id>`.
 5. Never satisfy a regex with content that is not true of the change.
+
+## Per-judgement modes
+
+The schema remains v1. Each `failing` entry now includes its effective `mode`; top-level `mode` remains the global default for compatibility. A green check can have shadow failures in `failing`, each with the usual Why/Fix guidance. Use the entry mode to tell whether that finding blocks. An enforced entry can fail even when top-level mode is shadow. Routing still uses its independent mode.

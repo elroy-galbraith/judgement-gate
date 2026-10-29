@@ -5,14 +5,14 @@ import type { OneWayDoorProbes } from "./judgements/one-way-door";
 import { BUILTIN_IDS, builtinById, type BuiltinDefaults } from "./judgements/registry";
 import type { GitHubClient } from "./github";
 import { DEFAULT_LABEL, DEFAULT_RULES, type RoutingRule, type RoutingSetup } from "./routing";
-import type { Env, Judgement } from "./types";
+import type { Env, Judgement, JudgementMode } from "./types";
 
 export class ConfigError extends Error {}
 
 const MAX_REGEX = 200;
 const MAX_PROBES = 7;
 const MAX_PROBE_LENGTH = 300;
-const USE_KEYS = new Set(["use", "confidence_threshold", "applies_to", "ignore", "probes"]);
+const USE_KEYS = new Set(["use", "confidence_threshold", "applies_to", "ignore", "probes", "repos", "mode"]);
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -23,12 +23,18 @@ function str(o: Obj, key: string, where: string): string {
   return v;
 }
 
-function globs(v: unknown, where: string): string[] | undefined {
+function globs(v: unknown, where: string, key = "applies_to"): string[] | undefined {
   if (v === undefined) return undefined;
-  if (!Array.isArray(v) || v.length === 0 || v.some((g) => typeof g !== "string" || g === "")) {
-    throw new ConfigError(`${where}: "applies_to" must be a non-empty list of glob strings (omit it to always apply)`);
+  if (!Array.isArray(v) || v.length === 0 || v.some((g) => typeof g !== "string" || g.trim() === "")) {
+    throw new ConfigError(`${where}: "${key}" must be a non-empty list of glob strings (omit it to always apply)`);
   }
   return v as string[];
+}
+
+function judgementMode(v: unknown, where: string): JudgementMode | undefined {
+  if (v === undefined) return undefined;
+  if (v !== "shadow" && v !== "enforce") throw new ConfigError(`${where}: "mode" must be "shadow" or "enforce"`);
+  return v;
 }
 
 /** `ignore` may be empty: on `use: one-way-door` that opts out of the default safe set. */
@@ -123,7 +129,7 @@ function satisfiedBy(v: unknown, where: string): SatisfiedBy[] {
   });
 }
 
-const DECLARATIVE_KEYS = new Set(["id", "name", "question", "true", "false", "threshold", "applies_to", "ignore", "satisfied_by", "why", "fix", "probes"]);
+const DECLARATIVE_KEYS = new Set(["id", "name", "question", "true", "false", "threshold", "applies_to", "ignore", "satisfied_by", "why", "fix", "probes", "repos", "mode"]);
 const KEBAB = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function declarative(o: Obj, where: string): DeclarativeSpec {
@@ -151,7 +157,7 @@ function declarative(o: Obj, where: string): DeclarativeSpec {
   };
 }
 
-const CLASSIFIER_KEYS = new Set(["id", "name", "classify", "applies_to", "ignore"]);
+const CLASSIFIER_KEYS = new Set(["id", "name", "classify", "applies_to", "ignore", "repos", "mode"]);
 const CLASSIFY_KEYS = new Set(["question", "levels"]);
 const LEVEL_KEYS = new Set(["id", "means"]);
 const LEVEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -336,6 +342,9 @@ export function parseGateConfig(text: string, defaults: BuiltinDefaults): { judg
       if ((BUILTIN_IDS as readonly string[]).includes(spec.id)) throw new ConfigError(`${where}: id collides with a built-in`);
       j = compileDeclarative(spec);
     }
+    // Shared metadata belongs to every entry kind, including built-ins and classifiers.
+    j.repos = globs(entry.repos, `judgements[${i}]`, "repos");
+    j.mode = judgementMode(entry.mode, `judgements[${i}]`);
     if (seen.has(j.id)) throw new ConfigError(`duplicate judgement id "${j.id}"`);
     seen.add(j.id);
     out.push(j);

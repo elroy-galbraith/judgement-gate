@@ -55,6 +55,8 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 
 Severity informs and never fails the check: there is nothing for an author to "clear". The level appears in the check summary (`pass: Severity (P1)`), in the remediation comment when one is already posted for a failing judgement, in the hidden agent block, and in analytics. Nothing acts on it yet, and it does not affect review routing. See [docs/configuration.md](docs/configuration.md#severity).
 
+Each judgement can set `repos: ["cac-api", "service-*"]` to match target repository names, and `mode: shadow` or `mode: enforce` to override global `MODE`. Both fields work on custom judgements, classifiers, and built-in `use:` entries. Omitted `repos` applies to every repo; omitted `mode` inherits `MODE` (default `shadow`). Repository and file filters must both match; skipped judgements send no Jev questions. Shadow failures appear in the summary and comment but do not fail the check, so a new judgement can be calibrated while existing ones enforce. Every summary line shows its effective mode. See [repository scope and judgement modes](docs/configuration.md#repository-scope-and-judgement-modes).
+
 ## Review routing
 
 Besides the check, the gate recommends who should review the PR: a **human** or an **agent**. By default a Type 1 result (a one-way door, even one with an ADR) or an ambiguous one routes to a human. An ADR shows that someone wrote the decision down, not that someone accountable accepted it, so a person still needs to look. You can add your own rules in the same YAML file, by judgement, by reason code or by changed-file glob.
@@ -109,9 +111,9 @@ The mock logs `LABEL added on #n: ...` when the gate labels a PR (scenarios 1 an
 
 ## Suggested rollout
 
-1. **Shadow on a few repos (2 weeks).** `MODE = "shadow"` is the default: the check always passes. Pick repos with real migrations, infra changes and agent-authored PRs.
+1. **Shadow on a few repos (2 weeks).** `MODE = "shadow"` is the default: completed evaluations pass unless a judgement explicitly sets `mode: enforce`. Pick repos with real migrations, infra changes and agent-authored PRs.
 2. **Review the flags with the team.** Would we have caught this? Was the flag wrong? Use the answers to tune thresholds.
-3. **Make the check required, still in shadow mode.** Add an organisation ruleset that requires `judgement-gate` on one willing repo while `MODE = "shadow"`. Every PR passes, so this only proves the check always reports. Then set `MODE = "enforce"`.
+3. **Make the check required, still in shadow mode.** Add an organisation ruleset that requires `judgement-gate` on one willing repo while `MODE = "shadow"`. With no per-judgement enforce overrides, completed evaluations pass, so this only proves the check always reports. Then set `MODE = "enforce"`.
 4. **Add judgements** each time review catches something the gate missed.
 
 Making the check required is the risky step: a required check that never reports blocks merges. The gate completes its check run even when evaluation fails (a `neutral` `[Audit Degraded]`, so it fails open), ignores draft PRs, and answers merge queue runs without re-evaluating. The one case it cannot cover is when GitHub will not even create the check run. [docs/operations.md](docs/operations.md#rolling-out-the-required-check-safely) lists these decisions, the ruleset settings to use, and how to back out.
@@ -124,4 +126,4 @@ For each PR event the Worker sends Jev (through OpenRouter) the PR title and bod
 
 ## Status
 
-Alpha. The Jev API (`/api/alpha/decisions`) may change, Jev's confidence score is not a probability, and the gate fails open: if Jev is unavailable the check is `neutral` and the PR is not blocked. Missing or malformed required answers degrade only their own judgement: a healthy failure still fails the gate in enforce mode; with no failures, incomplete coverage is `neutral`. See [partial answer degradation](docs/operations.md#partial-answer-degradation). Evaluations and false-positive replies are logged to Workers Analytics Engine (optional) so shadow-mode thresholds can be tuned from data; see [docs/calibration.md](docs/calibration.md).
+Alpha. The Jev API (`/api/alpha/decisions`) may change, Jev's confidence score is not a probability, and the gate fails open: if Jev is unavailable the check is `neutral` and the PR is not blocked. Missing or malformed required answers degrade only their own judgement: a healthy enforced failure still fails the gate; with no enforced failures, incomplete enforced coverage is `neutral`. Shadow failures and partial degradation stay visible without blocking. See [partial answer degradation](docs/operations.md#partial-answer-degradation). Evaluations and false-positive replies are logged to Workers Analytics Engine (optional) so shadow-mode thresholds can be tuned from data; see [docs/calibration.md](docs/calibration.md).

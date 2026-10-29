@@ -8,10 +8,12 @@ A judgement is what the gate asks about a change. The Worker sends every applica
 
 | Key | Meaning |
 |---|---|
-| `use` | Enable a built-in (`one-way-door`). Only `confidence_threshold`, `applies_to`, `ignore` and `probes` may be overridden. |
+| `use` | Enable a built-in (`one-way-door`). Only `confidence_threshold`, `applies_to`, `ignore`, `probes`, `repos` and `mode` may be overridden. |
 | `id`, `name` | Unique id (kebab-case) and the name shown in the comment. |
 | `question`, `true`, `false` | The yes/no question for Jev, and what each answer means. |
 | `threshold` | 0 to 1. Flagged when the probability of "true" is at least this. |
+| `repos` | Optional non-empty list of repository-name globs (`*`, `**`, `?`), such as `["cac-api", "service-*"]`. Omit for all repositories. |
+| `mode` | Optional `shadow` or `enforce`; overrides global `MODE`, whose default is `shadow`. |
 | `applies_to` | Optional globs (`*`, `**`, `?`). Judged only if a changed file matches. Omit for always. |
 | `ignore` | Optional globs. Files that match are not counted when deciding whether the judgement applies; see [Safe paths and `ignore`](#safe-paths-and-ignore). |
 | `satisfied_by` | Required. Any one entry clears the flag: `pr_body_matches` (regex, `(?i)` prefix for case-insensitive, max 200 chars), `file_added` (glob on a file the PR adds; modifying an existing file does not count, and a file renamed in from outside the glob does) or `answers` (a question the model judges against the PR description; see [Regex proves a line exists](#regex-proves-a-line-exists-not-that-it-means-anything)). |
@@ -24,9 +26,39 @@ Severity is a different kind of entry, with `classify:` instead of `question`/`t
 
 **A non-empty list replaces the default.** If you list only your own judgement, `one-way-door` stops running org-wide. Add `- use: one-way-door` to keep it.
 
+## Repository scope and judgement modes
+
+`repos` and `mode` work on every entry kind: built-in `use:`, declarative judgements, and classifiers. Repository globs match the **target repository name** (for example `cac-api`), case-sensitively, without the owner prefix. A fork PR uses the target repository's name, not the fork's. Matches are an OR within `repos`; repository scope and existing `applies_to`/`ignore` file filters must both match. An out-of-scope judgement contributes no questions to the shared Jev request and no result to routing or the summary. If nothing applies, Jev is not called and the check passes with "No applicable judgements". Empty lists, non-string/blank entries, and invalid mode values are config errors.
+
+```yaml
+judgements:
+  - use: one-way-door
+    mode: enforce
+  - id: trial-api-contract
+    name: Trial API contract
+    repos: ["cac-api", "service-*"]
+    mode: shadow
+    applies_to: ["lib/cac.js", "scripts/backfill.js"]
+    question: "Does this break an existing consumer?"
+    true: "breaking change"
+    false: "compatible change"
+    threshold: 0.6
+    satisfied_by: [{pr_body_matches: "^Migration Plan:"}]
+    why: "Consumers need time to migrate."
+    fix: "Add Migration Plan: to the PR description."
+```
+
+Each applicable judgement resolves its mode from its own `mode`, then global `MODE`, then `shadow`. An explicit `enforce` therefore still blocks under global shadow; global `MODE` is a default, not an emergency override. Classifiers still never fail, in either mode.
+
+Only enforced failures fail the check. Shadow failures retain their raw verdict and remediation in the comment, labelled as non-blocking. Each check-summary line ends in `[shadow]` or `[enforce]`. If shadow findings are present, the title does not claim every judgement passed. An all-shadow evaluation retains the `[Shadow]` title prefix. Existing comments are updated in place when findings clear.
+
+Partial missing/malformed answers in enforced judgements produce `neutral` unless another enforced judgement fails. Partial degradation in shadow judgements stays visible without neutralizing an otherwise successful check. A request-wide outage still follows the existing neutral `[Audit Degraded]` path in either mode.
+
+Routing continues to consider raw judgement results, including shadow findings. Label writes use `ROUTING_MODE`, which still defaults to global `MODE`; per-judgement mode does not change it. Evaluation analytics record each judgement's effective mode.
+
 ## Safe paths and `ignore`
 
-Every judgement is one model call, so a PR that cannot be a one-way door should not cost one. A judgement applies to a PR when at least one changed file is **not ignored** and, if the judgement has `applies_to`, matches it. When no judgement applies, the Worker does not call Jev and the check passes with "No applicable judgements".
+Applicable judgements share one model request, so a PR that needs no judgement should not cost a call. A judgement applies to a PR when at least one changed file is **not ignored** and, if the judgement has `applies_to`, matches it. When no judgement applies, the Worker does not call Jev and the check passes with "No applicable judgements".
 
 `ignore` takes globs (same syntax as `applies_to`) and works on every kind of judgement. There is no negation in a glob, so `ignore` is how you write "everything except docs".
 
@@ -102,7 +134,7 @@ The levels are a list so their order is explicit. `threshold`, `satisfied_by`, `
 
 **Where it shows up.**
 
-- The check summary has a line per judgement: `- pass: Severity (P1)`, or `- pass: Severity (no level reported)`. With severity as the only judgement the check title is `Severity: P1`.
+- The check summary has a line per judgement: `- pass: Severity (P1) [enforce]`, or `- pass: Severity (no level reported) [enforce]`. With severity as the only judgement the check title is `Severity: P1`.
 - The remediation comment gets a `**Severity:** P1 (confidence 0.82)` line, **only when a comment is already posted for a failing judgement**. Severity alone never causes a comment (a comment for a PR routed to a human, described under Review routing, shows it too).
 - The hidden agent block gets an additive `classification` field ([docs/agents.md](agents.md#classification)).
 - Analytics: an `evaluation` row for the id with outcome `passed`, the reason `<id>_classified` or `<id>_unreported`, the confidence in `double4`, and the level in `blob8` ([calibration.md](calibration.md)).

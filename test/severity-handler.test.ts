@@ -288,7 +288,7 @@ describe("partial degradation through the handler", () => {
     const points: { blobs?: string[] }[] = [];
     const net = fakeNet({ "good.q": { noul: 0.1 } }, [svcFile], config());
     const v = await processPullRequest(prEvent(), await makeEnv({ MODE: mode, ANALYTICS: { writeDataPoint: p => void points.push(p) } }), net.fetchFn);
-    expect(v.conclusion).toBe("neutral");
+    expect(v.conclusion).toBe(mode === "shadow" ? "success" : "neutral");
     expect(finalCheck(net.calls).conclusion).toBe(mode === "shadow" ? "success" : "neutral");
     expect(points.filter(p => p.blobs?.[0] === "evaluation").map(p => p.blobs?.[4])).toEqual(["degraded", "passed"]);
     expect(finalCheck(net.calls).output.summary).toContain("- pass: good");
@@ -307,9 +307,30 @@ describe("partial degradation through the handler", () => {
 
   it("uses success in shadow mode and reports the underlying partial failure", async () => {
     const net = fakeNet({ "good.q": { noul: 0.9 } }, [svcFile], config());
-    expect((await processPullRequest(prEvent(), await makeEnv({ MODE: "shadow" }), net.fetchFn)).conclusion).toBe("failure");
+    expect((await processPullRequest(prEvent(), await makeEnv({ MODE: "shadow" }), net.fetchFn)).conclusion).toBe("success");
     expect(finalCheck(net.calls).conclusion).toBe("success");
-    expect(finalCheck(net.calls).output.summary).toContain("would have concluded **failure**");
+    expect(finalCheck(net.calls).output.summary).toContain("- FAIL: good (good: not satisfied) [shadow]");
     expect(block(comment(net.calls)!).failing[0].id).toBe("good");
+  });
+});
+
+describe("classifier repository scope", () => {
+  it("skips a classifier in another repo without degrading healthy judgements", async () => {
+    const config = CONFIG.replace('    name: Severity', '    repos: [other]\n    mode: enforce\n    name: Severity');
+    const net = fakeNet(benignWithPlan, [svcFile], config);
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    const questions = net.calls.find(c => c.url.includes('jev.test'))!.body.questions;
+    expect(questions['severity.q']).toBeUndefined();
+    expect(questions.synthetic_classification).toBeDefined();
+    expect(finalCheck(net.calls).conclusion).toBe('success');
+    expect(finalCheck(net.calls).output.summary).not.toContain('Severity');
+  });
+
+  it("shows a classifier's effective mode and level when its repo glob matches", async () => {
+    const config = CONFIG.replace('    name: Severity', '    repos: ["r*"]\n    mode: shadow\n    name: Severity');
+    const net = fakeNet({ ...benignWithPlan, ...sev('P0') }, [svcFile], config);
+    await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
+    expect(finalCheck(net.calls).output.summary).toContain('Severity (P0) [shadow]');
+    expect(finalCheck(net.calls).conclusion).toBe('success');
   });
 });
