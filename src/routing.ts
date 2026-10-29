@@ -27,7 +27,7 @@ function matchRule(rule: RoutingRule, results: JudgementResult[] | null, files: 
     return glob === undefined ? null : `files: ${glob}`;
   }
   const hit = results?.find((r) => r.judgement.id === rule.judgement);
-  if (!hit) return null;
+  if (!hit || hit.verdict.conclusion === "neutral") return null;
   if (rule.reason !== undefined) return hit.verdict.reason === rule.reason ? `${rule.judgement}: ${rule.reason}` : null;
   return hit.verdict.fired ? `${rule.judgement} flagged` : null;
 }
@@ -46,5 +46,10 @@ export function evaluateRouting(setup: RoutingSetup, results: JudgementResult[] 
   if (reasons.length > 0) return { route: "human", reasons, label };
   // Without judgement results, "no rule matched" does not mean an agent can take it.
   if (results === null) return { route: "unavailable", reasons: ["audit degraded"], label };
+  // Only a missing result used by a routing rule makes an otherwise unmatched route uncertain.
+  if (setup.rules.some((rule) => "judgement" in rule && results.some((r) =>
+    r.judgement.id === rule.judgement && r.verdict.conclusion === "neutral"))) {
+    return { route: "unavailable", reasons: ["judgement rules skipped (audit degraded)"], label };
+  }
   return { route: "agent", reasons: [], label };
 }

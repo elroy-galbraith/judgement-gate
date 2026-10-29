@@ -11,10 +11,27 @@
 - Webhook is acknowledged with 202 immediately; work runs in `ctx.waitUntil`, so GitHub's 10s timeout never applies.
 - Handled actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, and `edited` only when title or body changed. Drafts are ignored (see [below](#what-is-deliberately-not-evaluated)). `merge_group` `checks_requested` is answered without evaluating (see [Merge queue](#merge-queue)).
 - A Jev 429, 5xx or network error is tried once more after a short random pause. Both attempts and the pause share the one `JEV_TIMEOUT_MS` budget (default 2500), so a retry never makes the check slower than that.
-- Jev error, bad response, or timeout (`JEV_TIMEOUT_MS`, default 2500) gives conclusion `neutral` titled `[Audit Degraded]`. A `choice` answer that is not one of the offered keys is a bad response (ignoring case and surrounding space); a classifier judgement just reports no level instead. It fails open, as does any other error once the check run exists (see [Fail-open](#fail-open-behaviour)).
-- When all applicable judgements pass, an existing gate comment is updated in place, clearing its remediation text and hidden failing instructions. The passing note never creates a new comment; human-review routing comments keep their existing behaviour. Shadow-mode failures still show remediation, and degraded evaluations leave existing comments unchanged. A comment API failure adds a diagnostic to the check summary without changing the verdict.
+- Jev request error, unreadable response, or timeout (`JEV_TIMEOUT_MS`, default 2500) gives conclusion `neutral` titled `[Audit Degraded]`. A `choice` answer that is not one of the offered keys (ignoring case and surrounding space) counts as an invalid answer for that judgement, see [Partial answer degradation](#partial-answer-degradation); a classifier judgement just reports no level instead. It fails open, as does any other error once the check run exists (see [Fail-open](#fail-open-behaviour)).
+- When all applicable judgements pass, an existing gate comment is updated in place, clearing its remediation text and hidden failing instructions. The passing note never creates a new comment; human-review routing comments keep their existing behaviour. Shadow-mode failures still show remediation, and request-wide outages leave existing comments unchanged. With partial degradation, comments retain healthy failures and name the unavailable judgements; an updated comment never claims that every judgement passed. A comment API failure adds a diagnostic to the check summary without changing the verdict.
 - Diff sent to Jev is capped at 50KB, with migrations, SQL, manifests, infra config and models first.
 - Jev contract: `POST /api/alpha/decisions` on OpenRouter, model `typesafe/jev-1.14`. This is an alpha API and may change.
+
+## Partial answer degradation
+
+Answers are validated per judgement. If a required answer is missing or malformed, only that judgement is degraded; its decision rule is skipped. Other judgements still decide from their validated answers in the same request. Check summaries list each pass, failure, and degraded judgement, including the affected question keys. Analytics records each judgement's own outcome.
+
+| Applicable judgement outcomes | Enforce-mode check conclusion |
+|---|---|
+| Any healthy judgement fails, even alongside degraded judgements | `failure`, preserving the healthy failure reason and remedy |
+| All pass | `success` |
+| No failures, but at least one degraded judgement | `neutral`, `[Audit Degraded]` |
+| No applicable judgements | `success`, no model request |
+
+In shadow mode, these completed evaluations publish `success` and describe the underlying conclusion in the summary. Request-wide errors (HTTP errors, network failures, timeouts, invalid JSON or an unusable response envelope) retain the existing `neutral` outage path in either mode.
+
+`optionalAnswers` is unchanged: malformed or missing optional answers are omitted and the judgement's decision rule receives the remaining answers. A classifier can therefore still report “no level reported.”
+
+Routing continues to match healthy judgement results and changed files. If no rule matches and a rule targets a degraded judgement, routing is unavailable because the missing result could require a human. Degradation alone never adds a review label or changes a healthy failure into a pass. Comment writes remain best-effort; comments are created only for a healthy failure or human routing, and existing comments can be updated to explain incomplete coverage.
 
 ## Fail-open behaviour
 
@@ -22,7 +39,7 @@ The rule: once the `judgement-gate` check run exists, it is always completed, an
 
 | What goes wrong | What the check shows |
 |---|---|
-| Jev error, timeout, unusable answer | `neutral`, `[Audit Degraded]` |
+| Jev request error, timeout, unreadable response | `neutral`, `[Audit Degraded]` |
 | Any other error after the check run was created (listing files, reading config, building the verdict) | `neutral`, `[Audit Degraded]`, with the error in the summary |
 | Completing the check run fails (GitHub 5xx, network) | Retried; if it still fails, a `neutral` completion is tried (also retried) |
 | Installation token or check run creation fails | Retried, then see below |
