@@ -1,0 +1,18 @@
+{
+  "id": "ow-ph-none-never-merged",
+  "attack": "placeholder",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Reproduces the throwaway-PR data point from issue #9: 'none' with a nonsense reason.",
+  "title": "Add search suggestions behind a flag",
+  "body": "Adds suggestions.\n\nReversal Trigger: none; this PR is never merged.\nRollback Path: none",
+  "files": [
+    {
+      "filename": "src/search/suggest.ts",
+      "status": "added",
+      "patch": "@@ -1,3 +1,6 @@\n+import { flags } from \"../flags\";\n+export function renderSuggestions(q: string) {\n+  if (!flags.NEW_SEARCH) return [];\n+  return suggest(q).slice(0, 5);\n+}"
+    }
+  ]
+}

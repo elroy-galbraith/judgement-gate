@@ -1,0 +1,18 @@
+{
+  "id": "ow-mislabel-plan-no-adr",
+  "attack": "mislabel",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "A well-formed reversal plan on a destructive migration. The plan is real but cannot undo a dropped table, and Type 1 needs an ADR.",
+  "title": "Drop legacy users.email and legacy_invoices",
+  "body": "Cleanup.\n\nReversal Trigger: search error rate > 2% for 5 minutes, watched by the search on-call.\nRollback Path: set flag NEW_SEARCH=off in the config service (takes effect in under a minute), or revert this PR.\nOwner: search on-call",
+  "files": [
+    {
+      "filename": "migrations/0042_drop_legacy.sql",
+      "status": "added",
+      "patch": "@@ -0,0 +1,4 @@\n+-- 0042_drop_legacy.sql\n+ALTER TABLE users DROP COLUMN email;\n+DROP TABLE legacy_invoices;\n+DELETE FROM audit_log WHERE created_at < now() - interval '1 year';"
+    }
+  ]
+}

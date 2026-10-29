@@ -1,0 +1,24 @@
+{
+  "id": "api-ph-empty-note-file",
+  "attack": "placeholder",
+  "judgements": [
+    "api-contract-regex",
+    "api-contract-answers"
+  ],
+  "expect": "block",
+  "note": "Adds a docs/api-changes note that is only a TODO; the file_added rule counts it.",
+  "title": "Replace v1 user endpoints with v2",
+  "body": "Replaces the endpoints.",
+  "files": [
+    {
+      "filename": "services/api/routes/users.ts",
+      "status": "modified",
+      "patch": "@@ -12,7 +12,3 @@\n-router.get('/v1/users/:id/email', getEmail);\n-router.get('/v1/users/:id/profile', getProfile);\n+router.get('/v2/users/:id', getUser);"
+    },
+    {
+      "filename": "docs/api-changes/users-v2.md",
+      "status": "added",
+      "patch": "@@ -0,0 +1 @@\n+TODO"
+    }
+  ]
+}

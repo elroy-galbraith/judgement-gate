@@ -122,7 +122,7 @@ More in [docs/operations.md](docs/operations.md).
 
 ## Data and privacy
 
-For each PR event the Worker sends Jev (through OpenRouter) the PR title and body, the changed-file list, and a diff capped at 50KB. The Worker stores nothing. Check that this is acceptable for your repos, and use the app's repository selection to limit where it runs.
+For each PR event the Worker sends Jev (through OpenRouter) the PR title and body, the changed-file list, and a diff capped at 50KB (shared fairly between files; a PR too big to send in full is flagged as ambiguous). The Worker stores nothing. Check that this is acceptable for your repos, and use the app's repository selection to limit where it runs.
 
 ## Status
 
