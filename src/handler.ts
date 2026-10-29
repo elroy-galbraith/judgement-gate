@@ -207,7 +207,20 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
         fetchFn,
       );
       latencyMs = Date.now() - jevStart;
-      results = applicable.map((judgement) => ({ judgement, verdict: judgement.decide(answers[judgement.id], ctx) }));
+      results = applicable.map((judgement) => {
+        const evaluation = answers[judgement.id];
+        if (evaluation.status === "ok") return { judgement, verdict: judgement.decide(evaluation.answers, ctx) };
+        return {
+          judgement,
+          verdict: {
+            conclusion: "neutral" as const,
+            reason: "degraded" as const,
+            fired: false as const,
+            summary: `Missing or malformed answers: ${evaluation.invalidQuestions.join(", ")}`,
+            invalidQuestions: evaluation.invalidQuestions,
+          },
+        };
+      });
     }
     const verdict = aggregate(results);
     for (const { judgement, verdict: v } of results) {
@@ -217,7 +230,7 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
         pr,
         judgement: judgement.id,
         mode,
-        outcome: v.conclusion === "failure" ? "flagged" : v.metrics?.cleared ? "cleared" : "passed",
+        outcome: v.conclusion === "neutral" ? "degraded" : v.conclusion === "failure" ? "flagged" : v.metrics?.cleared ? "cleared" : "passed",
         reason: v.reason,
         probability: v.metrics?.probability,
         confidence: v.metrics?.confidence,
@@ -253,8 +266,8 @@ export async function processPullRequest(ev: PullRequestEvent, env: Env, fetchFn
     }
     // A classifier's summary is its name and level, so the line shows the level alone.
     const lines = results.map((r) => {
-      const shown = r.judgement.kind === "classifier" ? (r.verdict.classification?.level ?? "no level reported") : r.verdict.summary;
-      return `- ${r.verdict.conclusion === "success" ? "pass" : "FAIL"}: ${r.judgement.name} (${shown})`;
+      const shown = r.verdict.conclusion !== "neutral" && r.judgement.kind === "classifier" ? (r.verdict.classification?.level ?? "no level reported") : r.verdict.summary;
+      return `- ${r.verdict.conclusion === "neutral" ? "degraded" : r.verdict.conclusion === "success" ? "pass" : "FAIL"}: ${r.judgement.name} (${shown})`;
     });
     const detail = lines.length > 0 ? `${verdict.summary}\n\n${lines.join("\n")}` : verdict.summary;
     await complete(
