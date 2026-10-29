@@ -1,4 +1,4 @@
-import type { JudgementResult } from "./aggregate";
+import { isDecided, type JudgementResult } from "./aggregate";
 import { FALSE_POSITIVE_COMMAND } from "./analytics";
 import { COMMENT_MARKER } from "./github";
 import type { RoutingResult } from "./routing";
@@ -19,7 +19,7 @@ function agentBlock(failing: JudgementResult[], rc: RemedyContext, mode: string,
   const payload = {
     schema: AGENT_BLOCK_VERSION,
     mode,
-    failing: failing.map(({ judgement, verdict }) => {
+    failing: failing.filter(isDecided).map(({ judgement, verdict }) => {
       const hint = judgement.agent?.(verdict, rc);
       return {
         id: judgement.id,
@@ -85,9 +85,10 @@ export function renderComment(
 ): string {
   const classified = all.filter((r) => r.verdict.classification);
   const header = headerLines(classified, routing, routingMode);
+  const degraded = degradationNote(all);
   const heading =
-    failing.length === 0 ? "all applicable judgements passed" : failing.length === 1 ? failing[0].verdict.summary : `${failing.length} judgements need attention`;
-  const sections = failing.map(({ judgement, verdict }) => {
+    failing.length === 0 ? (degraded ? "audit incomplete; no failures in evaluated judgements" : "all applicable judgements passed") : failing.length === 1 ? failing[0].verdict.summary : `${failing.length} judgements need attention`;
+  const sections = failing.filter(isDecided).map(({ judgement, verdict }) => {
     const r = judgement.remedy(verdict, rc);
     const parts = [`#### ${judgement.name}`, "", `**Why:** ${r.why}`, "", "**Fix:**", "", r.fix];
     const probes = judgement.probes?.(verdict) ?? [];
@@ -96,7 +97,7 @@ export function renderComment(
     parts.push("", `<sub>Not a real issue? Reply \`${FALSE_POSITIVE_COMMAND} ${judgement.id}\` to help calibrate.</sub>`);
     return parts.join("\n");
   });
-  return `${COMMENT_MARKER}\n### judgement-gate: ${heading}\n\n${header.length > 0 ? `${header.join("  \n")}\n\n` : ""}${sections.join("\n\n")}\n\n${agentBlock(failing, rc, mode, routing, classified)}`;
+  return `${COMMENT_MARKER}\n### judgement-gate: ${heading}\n\n${header.length > 0 ? `${header.join("  \n")}\n\n` : ""}${sections.join("\n\n")}${degraded ? `\n\n${degraded}` : ""}\n\n${agentBlock(failing, rc, mode, routing, classified)}`;
 }
 
 /**
@@ -107,8 +108,10 @@ export function renderComment(
 export function renderRoutingComment(routing: RoutingResult, rc: RemedyContext, mode: string, routingMode: string, all: JudgementResult[]): string {
   const classified = all.filter((r) => r.verdict.classification);
   const header = headerLines(classified, routing, routingMode);
-  const heading = routingMode === "shadow" ? "passed the checks, human review recommended" : "passed the checks, routed to a human reviewer";
+  const degraded = degradationNote(all);
+  const heading = degraded ? "audit incomplete, human review recommended" : routingMode === "shadow" ? "passed the checks, human review recommended" : "passed the checks, routed to a human reviewer";
   const sections = all
+    .filter(isDecided)
     .filter((r) => r.verdict.conclusion === "success" && r.verdict.fired)
     .map(({ judgement, verdict }) => {
       const parts = [`#### ${judgement.name}`, "", judgement.remedy(verdict, rc).why];
@@ -116,6 +119,12 @@ export function renderRoutingComment(routing: RoutingResult, rc: RemedyContext, 
       if (probes.length > 0) parts.push("", "**Questions a reviewer will ask:**", "", ...probes.map((p) => `- ${p}`));
       return parts.join("\n");
     });
-  const body = [COMMENT_MARKER, `### judgement-gate: ${heading}`, "", header.join("  \n"), "", ...sections.flatMap((x) => [x, ""]), agentBlock([], rc, mode, routing, classified)];
+  const body = [COMMENT_MARKER, `### judgement-gate: ${heading}`, "", header.join("  \n"), "", ...(degraded ? [degraded, ""] : []), ...sections.flatMap((x) => [x, ""]), agentBlock([], rc, mode, routing, classified)];
   return body.join("\n");
+}
+
+/** Only authored judgement names are shown; model-provided answer text is never echoed. */
+function degradationNote(all: JudgementResult[]): string {
+  const degraded = all.filter((r) => r.verdict.conclusion === "neutral");
+  return degraded.length > 0 ? `**Audit degraded:** ${degraded.map(r => code(r.judgement.name)).join(", ")}. These judgements could not be evaluated.` : "";
 }

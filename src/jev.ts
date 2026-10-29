@@ -29,12 +29,16 @@ export function buildRequest(ctx: PrContext, model: string, judgements: Judgemen
   };
 }
 
+export type JevEvaluation =
+  | { status: "ok"; answers: JevAnswers }
+  | { status: "degraded"; invalidQuestions: string[] };
+
 export async function evaluate(
   ctx: PrContext,
   judgements: Judgement[],
   cfg: JevConfig,
   fetchFn: FetchFn,
-): Promise<Record<string, JevAnswers>> {
+): Promise<Record<string, JevEvaluation>> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), cfg.timeoutMs);
   let res: Response;
@@ -52,23 +56,30 @@ export async function evaluate(
     clearTimeout(timer);
   }
   if (!res.ok) throw new Error(`Jev -> ${res.status} ${await res.text()}`);
-  const raw = ((await res.json()) as { answers?: JevAnswers }).answers ?? {};
+  const payload: unknown = await res.json();
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Jev response is not an object");
+  const raw = (payload as { answers?: unknown }).answers ?? {};
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("Jev answers is not an object");
+  const answers = raw as Record<string, JevAnswers[string]>;
 
-  const out: Record<string, JevAnswers> = {};
+  const out: Record<string, JevEvaluation> = {};
   for (const j of judgements) {
-    out[j.id] = {};
+    const valid: JevAnswers = {};
+    const invalidQuestions: string[] = [];
     for (const [key, q] of Object.entries(j.questions)) {
-      const a = raw[questionKey(j, key)];
+      const a = answers[questionKey(j, key)];
       const ok =
         q.type === "noul"
           ? typeof a?.noul === "number" && a.noul >= 0 && a.noul <= 1
           : typeof a?.choice === "string" && a.choice !== "" && (a.confidence === undefined || typeof a.confidence === "number");
       if (!ok) {
         if (j.optionalAnswers) continue;
-        throw new Error("Jev response missing expected answers");
+        invalidQuestions.push(questionKey(j, key));
+        continue;
       }
-      out[j.id][key] = a;
+      valid[key] = a;
     }
+    out[j.id] = invalidQuestions.length > 0 ? { status: "degraded", invalidQuestions } : { status: "ok", answers: valid };
   }
   return out;
 }

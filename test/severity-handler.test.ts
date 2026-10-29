@@ -179,10 +179,12 @@ describe("severity through the handler", () => {
     expect(check.output.summary).toContain("- pass: Severity (no level reported)");
   });
 
-  it("a missing one-way-door answer still degrades, as before", async () => {
+  it("a missing one-way-door answer degrades without hiding severity", async () => {
     const net = fakeNet({ ...sev("P1"), is_one_way_boundary_mutation: { noul: 0.1 } });
     const v = await processPullRequest(prEvent(), await makeEnv(), net.fetchFn);
     expect(v.summary).toBe("[Audit Degraded]");
+    expect(finalCheck(net.calls).output.summary).toContain("- pass: Severity (P1)");
+    expect(finalCheck(net.calls).output.summary).toContain("- degraded: One-way door");
   });
 
   it("is not asked about, nor shown, when applies_to does not match", async () => {
@@ -251,5 +253,63 @@ describe("severity analytics", () => {
     await processPullRequest(prEvent(), await makeEnv({ ANALYTICS: s }), net.fetchFn);
     const p = points.find((x) => x.blobs?.[2] === "one-way-door")!;
     expect(p.blobs).toHaveLength(7);
+  });
+});
+
+// Two required judgements share one model response: neither may disable the other.
+describe("partial degradation through the handler", () => {
+  const rule = (id: string) => ({ id, name: id, question: `Risk for ${id}?`, true: "risky", false: "safe",
+    threshold: 0.6, satisfied_by: [{ pr_body_matches: "^Plan:" }], why: "needs a plan", fix: "add Plan:" });
+  const config = (reverse = false, routing?: unknown) => JSON.stringify({
+    judgements: (reverse ? ["good", "bad"] : ["bad", "good"]).map(rule),
+    routing: routing ?? { include_defaults: false, human_when: [{ judgement: "good" }, { judgement: "bad" }] },
+  });
+
+  it.each([false, true])("retains a healthy failure and its analytics (reverse=%s)", async (reverse) => {
+    const points: { blobs?: string[] }[] = [];
+    const net = fakeNet({ "bad.q": { noul: "broken" }, "good.q": { noul: 0.9 } }, [svcFile], config(reverse));
+    const v = await processPullRequest(prEvent(), await makeEnv({ ANALYTICS: { writeDataPoint: p => void points.push(p) } }), net.fetchFn);
+    expect(v).toMatchObject({ conclusion: "failure", reason: "good_unsatisfied" });
+    const check = finalCheck(net.calls);
+    expect(check.conclusion).toBe("failure");
+    expect(check.output.summary).toContain("- degraded: bad");
+    expect(check.output.summary).toContain("- FAIL: good");
+    expect(labels(net.calls)).toHaveLength(1);
+    const md = comment(net.calls)!;
+    expect(md).toContain("**Fix:**");
+    expect(md).toContain("bad");
+    expect(block(md).failing.map((f: { id: string }) => f.id)).toEqual(["good"]);
+    expect(points.filter(p => p.blobs?.[0] === "evaluation").map(p => p.blobs?.slice(2, 6))).toEqual(
+      (reverse ? ["good", "bad"] : ["bad", "good"]).map(id =>
+        [id, "enforce", id === "bad" ? "degraded" : "flagged", id === "bad" ? "degraded" : "good_unsatisfied"]));
+  });
+
+  it.each(["enforce", "shadow"])("keeps a healthy pass visible with incomplete coverage (%s)", async (mode) => {
+    const points: { blobs?: string[] }[] = [];
+    const net = fakeNet({ "good.q": { noul: 0.1 } }, [svcFile], config());
+    const v = await processPullRequest(prEvent(), await makeEnv({ MODE: mode, ANALYTICS: { writeDataPoint: p => void points.push(p) } }), net.fetchFn);
+    expect(v.conclusion).toBe("neutral");
+    expect(finalCheck(net.calls).conclusion).toBe(mode === "shadow" ? "success" : "neutral");
+    expect(points.filter(p => p.blobs?.[0] === "evaluation").map(p => p.blobs?.[4])).toEqual(["degraded", "passed"]);
+    expect(finalCheck(net.calls).output.summary).toContain("- pass: good");
+    expect(finalCheck(net.calls).output.summary).toContain("- degraded: bad");
+    expect(finalCheck(net.calls).output.summary).toContain("Review routing: unavailable");
+    expect(comment(net.calls)).toBeUndefined();
+  });
+
+  it("still routes on changed files when all required answers are missing", async () => {
+    const net = fakeNet({}, [svcFile], config(false, { include_defaults: false, human_when: [{ files: ["services/**"] }] }));
+    expect((await processPullRequest(prEvent(), await makeEnv(), net.fetchFn)).conclusion).toBe("neutral");
+    expect(labels(net.calls)).toHaveLength(1);
+    expect(comment(net.calls)).not.toContain("passed the checks");
+    expect(comment(net.calls)).not.toContain("all applicable judgements passed");
+  });
+
+  it("uses success in shadow mode and reports the underlying partial failure", async () => {
+    const net = fakeNet({ "good.q": { noul: 0.9 } }, [svcFile], config());
+    expect((await processPullRequest(prEvent(), await makeEnv({ MODE: "shadow" }), net.fetchFn)).conclusion).toBe("failure");
+    expect(finalCheck(net.calls).conclusion).toBe("success");
+    expect(finalCheck(net.calls).output.summary).toContain("would have concluded **failure**");
+    expect(block(comment(net.calls)!).failing[0].id).toBe("good");
   });
 });
