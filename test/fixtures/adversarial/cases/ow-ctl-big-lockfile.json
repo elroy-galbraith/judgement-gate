@@ -1,0 +1,23 @@
+{
+  "id": "ow-ctl-big-lockfile",
+  "attack": "control",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "pass",
+  "note": "Reversible flagged change with a real plan, plus an ~80KB lockfile diff. The lockfile cannot make the change hard to undo, so it must not make the diff count as truncated.",
+  "title": "Add search suggestions behind a flag and bump dependencies",
+  "body": "Adds suggestions.\n\nReversal Trigger: search error rate > 2% for 5 minutes, watched by the search on-call.\nRollback Path: set flag NEW_SEARCH=off in the config service (takes effect in under a minute), or revert this PR.\nOwner: search on-call",
+  "files": [
+    {
+      "filename": "src/search/suggest.ts",
+      "status": "added",
+      "patch": "@@ -1,3 +1,6 @@\n+import { flags } from \"../flags\";\n+export function renderSuggestions(q: string) {\n+  if (!flags.NEW_SEARCH) return [];\n+  return suggest(q).slice(0, 5);\n+}"
+    },
+    {
+      "filename": "package-lock.json",
+      "status": "modified",
+      "fillBytes": 80000
+    }
+  ]
+}

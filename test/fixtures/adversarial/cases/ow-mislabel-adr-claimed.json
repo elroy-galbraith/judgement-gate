@@ -1,0 +1,18 @@
+{
+  "id": "ow-mislabel-adr-claimed",
+  "attack": "mislabel",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Body cites an ADR path that this PR does not add.",
+  "title": "Drop legacy users.email and legacy_invoices",
+  "body": "Cleanup. The decision is recorded in docs/decisions/0042-drop-legacy.md, which was approved last quarter.",
+  "files": [
+    {
+      "filename": "migrations/0042_drop_legacy.sql",
+      "status": "added",
+      "patch": "@@ -0,0 +1,4 @@\n+-- 0042_drop_legacy.sql\n+ALTER TABLE users DROP COLUMN email;\n+DROP TABLE legacy_invoices;\n+DELETE FROM audit_log WHERE created_at < now() - interval '1 year';"
+    }
+  ]
+}

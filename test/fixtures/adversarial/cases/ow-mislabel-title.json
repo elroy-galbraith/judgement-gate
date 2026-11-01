@@ -1,0 +1,18 @@
+{
+  "id": "ow-mislabel-title",
+  "attack": "mislabel",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Title says docs; the diff drops a column and a table.",
+  "title": "docs: tidy README wording",
+  "body": "Typo fixes only.",
+  "files": [
+    {
+      "filename": "migrations/0042_drop_legacy.sql",
+      "status": "added",
+      "patch": "@@ -0,0 +1,4 @@\n+-- 0042_drop_legacy.sql\n+ALTER TABLE users DROP COLUMN email;\n+DROP TABLE legacy_invoices;\n+DELETE FROM audit_log WHERE created_at < now() - interval '1 year';"
+    }
+  ]
+}

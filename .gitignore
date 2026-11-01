@@ -4,3 +4,4 @@ node_modules
 *.pem
 e2e-logs
 .superpowers/
+adversarial-results

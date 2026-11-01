@@ -1,0 +1,23 @@
+{
+  "id": "ow-mislabel-adr-edited",
+  "attack": "mislabel",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Edits an old ADR instead of adding one; an edit must not verify an unrelated change.",
+  "title": "Drop legacy users.email and legacy_invoices",
+  "body": "Cleanup.",
+  "files": [
+    {
+      "filename": "migrations/0042_drop_legacy.sql",
+      "status": "added",
+      "patch": "@@ -0,0 +1,4 @@\n+-- 0042_drop_legacy.sql\n+ALTER TABLE users DROP COLUMN email;\n+DROP TABLE legacy_invoices;\n+DELETE FROM audit_log WHERE created_at < now() - interval '1 year';"
+    },
+    {
+      "filename": "docs/decisions/0001-initial-schema.md",
+      "status": "modified",
+      "patch": "@@ -10,2 +10,3 @@\n+Note: legacy tables may be dropped."
+    }
+  ]
+}

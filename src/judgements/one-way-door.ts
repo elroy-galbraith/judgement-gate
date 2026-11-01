@@ -109,14 +109,14 @@ export function oneWayDoor(opts: OneWayDoorOptions = {}): Judgement {
     },
     decide(answers, pr): JudgementVerdict {
       const j = toJevResult(answers);
-      const v = evaluatePolicy(j, pr.files, { confidenceThreshold });
+      const v = evaluatePolicy(j, pr.files, { confidenceThreshold, diffTruncated: pr.diffTruncated });
       return {
         conclusion: v.conclusion === "success" ? "success" : "failure",
         reason: v.reason,
         summary: v.summary,
         fired: v.reason.startsWith("type1"),
         metrics: { probability: j.oneWayProb, confidence: j.classificationConfidence, cleared: v.reason === "type1_adr" },
-        signals: `Signals: one-way boundary ${pct(j.oneWayProb)}, additive/isolated ${pct(j.additiveProb)}, reversal plan ${pct(j.reversalProb)}, classified ${j.classification} (confidence ${j.classificationConfidence.toFixed(2)}).`,
+        signals: `Signals: one-way boundary ${pct(j.oneWayProb)}, additive/isolated ${pct(j.additiveProb)}, reversal plan ${pct(j.reversalProb)}, classified ${j.classification} (confidence ${j.classificationConfidence.toFixed(2)}).${pr.diffTruncated ? " The diff was too large to read in full." : ""}`,
       };
     },
     remedy(v, rc) {
@@ -154,8 +154,8 @@ export function oneWayDoor(opts: OneWayDoorOptions = {}): Judgement {
           };
         default:
           return {
-            why: "The model could not confidently size the blast radius of this change.",
-            fix: "Request a human peer review, or document the decision in an ADR under `docs/decisions/`.",
+            why: "The model could not confidently size the blast radius of this change, or the diff was too large for it to read in full.",
+            fix: "Split the PR into smaller ones, request a human peer review, or document the decision in an ADR under `docs/decisions/`.",
           };
       }
     },

@@ -1,0 +1,19 @@
+{
+  "id": "api-ph-na",
+  "attack": "placeholder",
+  "judgements": [
+    "api-contract-regex",
+    "api-contract-answers"
+  ],
+  "expect": "block",
+  "note": "Removes /v1 endpoints; the regex line is 'n/a'.",
+  "title": "Replace v1 user endpoints with v2",
+  "body": "Replaces the endpoints.\n\nMigration Plan: n/a",
+  "files": [
+    {
+      "filename": "services/api/routes/users.ts",
+      "status": "modified",
+      "patch": "@@ -12,7 +12,3 @@\n-router.get('/v1/users/:id/email', getEmail);\n-router.get('/v1/users/:id/profile', getProfile);\n+router.get('/v2/users/:id', getUser);"
+    }
+  ]
+}

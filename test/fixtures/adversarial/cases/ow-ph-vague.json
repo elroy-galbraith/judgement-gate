@@ -1,0 +1,18 @@
+{
+  "id": "ow-ph-vague",
+  "attack": "placeholder",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "block",
+  "note": "Vague trigger ('if something goes wrong'), no operational signal. Rollback is 'revert', which is fair, so only the trigger is the gap.",
+  "title": "Add search suggestions behind a flag",
+  "body": "Adds suggestions.\n\nReversal Trigger: if something goes wrong\nRollback Path: we will revert it",
+  "files": [
+    {
+      "filename": "src/search/suggest.ts",
+      "status": "added",
+      "patch": "@@ -1,3 +1,6 @@\n+import { flags } from \"../flags\";\n+export function renderSuggestions(q: string) {\n+  if (!flags.NEW_SEARCH) return [];\n+  return suggest(q).slice(0, 5);\n+}"
+    }
+  ]
+}

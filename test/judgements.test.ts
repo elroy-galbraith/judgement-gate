@@ -75,6 +75,14 @@ describe("one-way-door judgement", () => {
     expect(j.decide(low, pr()).reason).toBe("ambiguous");
     expect(oneWayDoor({ confidenceThreshold: 0.4 }).decide(low, pr()).reason).toBe("type2_ok");
   });
+  it("a truncated diff is ambiguous, says so, and gets the type 1 probes", () => {
+    const v = j.decide(type2, { ...pr(), diffTruncated: true });
+    expect(v).toMatchObject({ conclusion: "failure", reason: "ambiguous", fired: false });
+    expect(v.signals).toContain("too large to read in full");
+    expect(j.decide(type2, pr()).signals).not.toContain("too large");
+    expect(j.probes!(v)).toEqual(DEFAULT_PROBES.type1);
+    expect(j.remedy(v, { owner: "o", repo: "r" }).fix).toContain("Split the PR");
+  });
   it("remedy teaches why and says what to do", () => {
     const rc = { owner: "o", repo: "r", headRef: "abc" };
     const r1 = j.remedy(j.decide(type1, pr()), rc);

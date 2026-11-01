@@ -1,0 +1,23 @@
+{
+  "id": "ow-ctl-t1-with-adr",
+  "attack": "control",
+  "judgements": [
+    "one-way-door"
+  ],
+  "expect": "pass",
+  "note": "Destructive migration with an ADR added in the same PR.",
+  "title": "Drop legacy users.email and legacy_invoices",
+  "body": "Cleanup. Decision and rollback limits are in the ADR.",
+  "files": [
+    {
+      "filename": "migrations/0042_drop_legacy.sql",
+      "status": "added",
+      "patch": "@@ -0,0 +1,4 @@\n+-- 0042_drop_legacy.sql\n+ALTER TABLE users DROP COLUMN email;\n+DROP TABLE legacy_invoices;\n+DELETE FROM audit_log WHERE created_at < now() - interval '1 year';"
+    },
+    {
+      "filename": "docs/decisions/0042-drop-legacy.md",
+      "status": "added",
+      "patch": "@@ -0,0 +1,8 @@\n+# 0042: Drop legacy tables\n+## Context\n+Nothing reads them since March.\n+## Decision\n+Drop them.\n+## Rollback limits\n+Restore from the nightly backup; up to 24h of loss."
+    }
+  ]
+}

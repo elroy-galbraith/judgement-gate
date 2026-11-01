@@ -11,7 +11,8 @@
     "mock-github": "node scripts/mock-github.mjs",
     "simulate": "node scripts/simulate.mjs",
     "jev-smoke": "node scripts/jev-smoke.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "adversarial": "esbuild scripts/adversarial.ts --bundle --packages=external --platform=node --format=esm --log-level=warning --outfile=.wrangler/adversarial.mjs && node .wrangler/adversarial.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261016.1",

@@ -71,6 +71,8 @@ export interface PrContext {
   headSha: string;
   files: ChangedFile[];
   patchExtract: string;
+  /** The extract leaves part of the diff out (see buildDiffExtract), so a verdict rests on a partial view. */
+  diffTruncated?: boolean;
 }
 
 export interface JevResult {
