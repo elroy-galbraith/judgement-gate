@@ -110,7 +110,7 @@ describe("evaluation events", () => {
 
   it("works exactly as before without the binding", async () => {
     const v = await processPullRequest(prEvent(), await makeEnv(), net(flaggedJev));
-    expect(v.reason).toBe("type1_no_adr");
+    expect(v).toMatchObject({ conclusion: "success", reason: "shadow_findings" });
   });
 
   it("a throwing binding does not affect the verdict", async () => {
@@ -120,7 +120,7 @@ describe("evaluation events", () => {
       },
     };
     const v = await processPullRequest(prEvent(), await makeEnv({ ANALYTICS: bad }), net(flaggedJev));
-    expect(v.reason).toBe("type1_no_adr");
+    expect(v).toMatchObject({ conclusion: "success", reason: "shadow_findings" });
     expect(() => record(bad, { event: "feedback", repo: "o/r", pr: 1, judgement: "x", mode: "shadow", outcome: "false_positive" })).not.toThrow();
   });
 });

@@ -128,12 +128,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const sign = (payload) => "sha256=" + crypto.createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
 
-function webhook(scenario, pr, sha, previousBody) {
+function webhook(scenario, pr, sha, previousBody, repo = "demo") {
   return JSON.stringify({
     action: previousBody === undefined ? "opened" : "edited",
     ...(previousBody !== undefined && { changes: { body: { from: previousBody } } }),
     installation: { id: 1 },
-    repository: { name: "demo", owner: { login: "acme" } },
+    repository: { name: repo, owner: { login: "acme" } },
     pull_request: { number: pr, title: scenario.title, body: scenario.body, draft: false, base: { ref: "main" }, head: { sha } },
   });
 }
@@ -199,6 +199,48 @@ const routingComment = (e, r, why) => {
 };
 
 const CASES = [
+  {
+    name: "S1 unrelated repository skips every judgement and makes no Jev request",
+    scenario: 7,
+    repo: "unrelated",
+    check(e, r) {
+      e.eq("conclusion", r.check.conclusion, "success");
+      e.has("summary", r.check.summary, "No applicable judgements");
+      e.eq("Jev request count", r.jevRequests, 0);
+      noComment(e, r);
+    },
+  },
+  {
+    name: "S2 enforced pass and shadow failure leave the check green with remediation",
+    scenario: 7,
+    repo: "trial-demo",
+    answers: { "trial.q": { noul: 0.9 } },
+    check(e, r) {
+      e.eq("conclusion", r.check.conclusion, "success");
+      e.has("summary", r.check.summary, "- pass: One-way door");
+      e.has("summary", r.check.summary, "- FAIL: Trial judgement (Trial judgement: not satisfied) [shadow]");
+      e.eq("Jev request count", r.jevRequests, 1);
+      oneComment(e, r);
+      e.has("comment", r.comments[0], "does not block the check");
+      e.has("comment", r.comments[0], "**Fix:**");
+      e.eq("block failing mode", r.block?.failing?.[0]?.mode, "shadow");
+    },
+  },
+  {
+    name: "S3 clearing a shadow finding updates the same comment",
+    scenario: 7,
+    repo: "trial-demo",
+    reusePr: true,
+    answers: { "trial.q": { noul: 0.1 } },
+    check(e, r, previous) {
+      e.eq("conclusion", r.check.conclusion, "success");
+      oneComment(e, r);
+      e.eq("comment ids", r.commentIds, previous.commentIds);
+      e.eq("block failing", r.block?.failing, []);
+      e.has("comment", r.comments[0], "all applicable judgements passed");
+      e.lacks("comment", r.comments[0], "**Fix:**");
+    },
+  },
   {
     name: "1 Type 1, no ADR",
     scenario: 1,
@@ -459,8 +501,28 @@ async function main() {
     ].join("\n"),
   );
 
+  // A private fixture keeps the demo unchanged. Every example judgement is scoped, plus a trial in shadow.
+  const configFile = path.join(tmpDir, "judgement-gate.yml");
+  const example = fs.readFileSync(path.join(ROOT, "examples/judgement-gate.yml"), "utf8")
+    .replace(/^(  - (?:use:|id:).*)$/gm, "$1\n    repos: [demo, 'trial-*']");
+  const trial = `
+  - id: trial
+    name: Trial judgement
+    repos: ['trial-*']
+    mode: shadow
+    question: "Does this need a plan?"
+    true: "yes"
+    false: "no"
+    threshold: 0.6
+    satisfied_by: [{pr_body_matches: '^Trial Plan:'}]
+    why: "Trial changes need a plan."
+    fix: "Add Trial Plan: to the PR description."
+
+`;
+  fs.writeFileSync(configFile, example.replace(/^routing:/m, trial + "routing:"));
+
   const stub = start("jev", ["scripts/jev-stub.mjs"], { PORT: String(jevPort), JEV_API_KEY: JEV_KEY });
-  const mock = start("github", ["scripts/mock-github.mjs"], { PORT: String(ghPort) });
+  const mock = start("github", ["scripts/mock-github.mjs"], { PORT: String(ghPort), MOCK_CONFIG: configFile });
   const wrangler = start(
     "worker",
     [
@@ -522,7 +584,8 @@ async function main() {
     await post(`${gh}/__register`, { pr, files: scenario.files });
     await post(`${jev}/__control`, { mode: c.mode ?? "ok", answers: { ...scenario.jev, ...c.answers } });
 
-    const payload = webhook(scenario, pr, sha, c.reusePr ? previousScenario.body : undefined);
+    const beforeJev = await (await fetch(`${jev}/__control`)).json();
+    const payload = webhook(scenario, pr, sha, c.reusePr ? previousScenario.body : undefined, c.repo);
     const res = await fetch(`${worker}/webhook`, {
       method: "POST",
       headers: { "X-GitHub-Event": "pull_request", "X-Hub-Signature-256": sign(payload), "Content-Type": "application/json" },
@@ -545,7 +608,8 @@ async function main() {
     }
     const comments = rec.comments[pr] ?? [];
     const storedComments = await (await fetch(`${gh}/repos/acme/demo/issues/${pr}/comments`)).json();
-    const r = { check, labels: rec.labels[pr] ?? [], comments, commentIds: storedComments.map((c) => c.id), block: parseBlock(comments[0]) };
+    const afterJev = await (await fetch(`${jev}/__control`)).json();
+    const r = { jevRequests: afterJev.requests - beforeJev.requests, check, labels: rec.labels[pr] ?? [], comments, commentIds: storedComments.map((c) => c.id), block: parseBlock(comments[0]) };
     c.check(e, r, previous);
     previous = r;
     previousScenario = scenario;

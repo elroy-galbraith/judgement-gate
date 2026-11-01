@@ -24,6 +24,7 @@ function agentBlock(failing: JudgementResult[], rc: RemedyContext, mode: string,
       return {
         id: judgement.id,
         name: judgement.name,
+        mode: judgement.mode ?? mode,
         reason: verdict.reason,
         probability: verdict.metrics?.probability ?? null,
         threshold: hint?.threshold ?? null,
@@ -90,7 +91,10 @@ export function renderComment(
     failing.length === 0 ? (degraded ? "audit incomplete; no failures in evaluated judgements" : "all applicable judgements passed") : failing.length === 1 ? failing[0].verdict.summary : `${failing.length} judgements need attention`;
   const sections = failing.filter(isDecided).map(({ judgement, verdict }) => {
     const r = judgement.remedy(verdict, rc);
-    const parts = [`#### ${judgement.name}`, "", `**Why:** ${r.why}`, "", "**Fix:**", "", r.fix];
+    const modeLine = (judgement.mode ?? mode) === "shadow"
+      ? "**Mode:** shadow — this finding does not block the check."
+      : "**Mode:** enforce";
+    const parts = [`#### ${judgement.name}`, "", modeLine, "", `**Why:** ${r.why}`, "", "**Fix:**", "", r.fix];
     const probes = judgement.probes?.(verdict) ?? [];
     if (probes.length > 0) parts.push("", "**Questions a reviewer will ask:**", "", ...probes.map((p) => `- ${p}`));
     if (verdict.signals) parts.push("", `<sub>${verdict.signals}</sub>`);

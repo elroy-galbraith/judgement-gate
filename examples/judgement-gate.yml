@@ -4,10 +4,12 @@
 #
 # Note: a non-empty list REPLACES the default. List `use: one-way-door` to keep it running.
 judgements:
-  # Built-in: is this a one-way door? Optional overrides: confidence_threshold, applies_to, ignore, probes.
+  # Built-in: is this a one-way door? Optional overrides: confidence_threshold, applies_to, ignore, probes, repos, mode.
   # By default it skips PRs that only touch docs, images and lockfiles. `ignore` replaces that set; `ignore: []` turns it off.
   - use: one-way-door
     confidence_threshold: 0.75
+    # repos: ["cac-api", "service-*"]    # optional: target repo names, without owner; omitted means all
+    # mode: enforce                     # optional: overrides global MODE (default shadow)
     # ignore: ["vendor/**", "**/*.md"]   # optional: replace the default safe set
     # probes:                            # optional: replace the built-in questions shown to the author
     #   type1: ["Who else reads this table, and how do you know?"]
@@ -20,6 +22,8 @@ judgements:
     true: "removes/renames endpoints, fields or exported symbols"
     false: "additive or internal only"
     threshold: 0.6                       # flagged when P(true) >= threshold
+    # repos: ["cac-api"]                 # optional: require a repo match AND a file match
+    # mode: shadow                       # optional: report findings while existing judgements enforce
     applies_to: ["services/api/**"]      # only judged when a changed file matches
     # ignore: ["**/*.md"]                # optional: these files do not count (a custom judgement ignores nothing by default)
     satisfied_by:                        # required; any one entry clears the flag
@@ -38,6 +42,7 @@ judgements:
   # severe first. There is no built-in rubric: what P0 means is for your org to write.
   - id: severity
     name: Severity
+    # repos: ["service-*"]               # optional; classifiers support repos and mode too
     classify:
       question: "If this change is wrong, how bad is the impact?"
       levels:
