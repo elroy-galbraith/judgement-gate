@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "lint-config": "node --import tsx/esm scripts/lint-config.ts",
     "mock-github": "node scripts/mock-github.mjs",
     "simulate": "node scripts/simulate.mjs",
     "jev-smoke": "node scripts/jev-smoke.mjs",
@@ -16,6 +17,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261016.1",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "wrangler": "^4.151.1"

@@ -4,11 +4,11 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "isolatedModules": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts/lint-config.ts"]
 }

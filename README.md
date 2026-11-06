@@ -37,6 +37,8 @@ A PR that only touches docs, images or lockfiles skips the built-in `one-way-doo
 
 Full reference: [docs/configuration.md](docs/configuration.md).
 
+Protect config edits with the shared-parser lint command and reusable CI workflow, then require the check and Code Owner review in the config repo. See [Protecting the config repository](docs/configuration.md#protecting-the-config-repository).
+
 ## Severity
 
 `one-way-door` asks whether a change can be undone. **Severity** asks a different question: how bad is it if this change is wrong? A reversible change to checkout can be P0; an irreversible change to an internal admin table can be P3. Your org writes the levels and what each means (P0 to P3, Sev1 to Sev4, anything), because companies disagree about it, and the gate ships no default rubric. The model picks one level per PR.
