@@ -1,0 +1,51 @@
+name: Lint judgement config
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        description: Path to the config file, relative to the calling repository root
+        type: string
+        required: false
+        default: .github/judgement-gate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  lint-config:
+    name: lint-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Default checkout is the caller's PR merge ref (or its push/merge-group ref).
+      # Treat it as data: never install its dependencies or execute its scripts.
+      - name: Check out config repository
+        uses: actions/checkout@v7
+        with:
+          path: config-repo
+          persist-credentials: false
+
+      # job.workflow_* identifies this reusable workflow, unlike github.* (the caller).
+      # This pins the parser to the same revision the caller selected with `uses:`.
+      - name: Check out validator
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: validator
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install validator dependencies
+        working-directory: validator
+        run: npm ci --ignore-scripts
+
+      - name: Validate config
+        working-directory: validator
+        env:
+          CONFIG_FILE: ${{ inputs.config-path }}
+        run: npm run lint-config -- "$GITHUB_WORKSPACE/config-repo/$CONFIG_FILE"

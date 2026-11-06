@@ -43,6 +43,12 @@ jobs:
       - name: Wrangler dry-run build
         run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/out"
 
+  # Exercise the reusable workflow itself, including its separate source checkouts.
+  config:
+    uses: ./.github/workflows/lint-config.yml
+    with:
+      config-path: examples/judgement-gate.yml
+
   # Runs the demo scenarios through the real Worker (`wrangler dev`) with a scripted Jev and the mock GitHub, all on
   # loopback. No secrets and no network beyond localhost; see scripts/e2e.mjs.
   e2e:
