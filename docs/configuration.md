@@ -26,6 +26,67 @@ Severity is a different kind of entry, with `classify:` instead of `question`/`t
 
 **A non-empty list replaces the default.** If you list only your own judgement, `one-way-door` stops running org-wide. Add `- use: one-way-door` to keep it.
 
+## Protecting the config repository
+
+Validate config changes before merging them. The lint command uses the same `parseGateConfig` parser behind the Worker's `parseConfig`, including routing validation. It makes no GitHub or model calls and needs no secrets. A schema error such as `applies-to:` produces the same diagnostic as the Worker:
+
+```text
+.github/judgement-gate.yml: judgements[0] (use: one-way-door): cannot override applies-to
+```
+
+### Local validation
+
+From a checkout of judgement-gate, with Node 24:
+
+```sh
+npm ci
+npm run lint-config -- /path/to/config-repo/.github/judgement-gate.yml
+```
+
+The path is optional and defaults to `.github/judgement-gate.yml` relative to the working directory. Relative paths and paths containing spaces are supported. Exit status is 0 for valid config and 1 for invalid config, routing errors, unreadable/missing files, or invalid arguments. An existing empty file, a comment-only file, or `judgements: []` is valid and selects the Worker's defaults. A missing file fails lint so an accidental deletion cannot silently pass CI. The Worker's runtime fallback behaviour is unchanged.
+
+### Required CI check
+
+Create `.github/workflows/judgement-config.yml` in the **config repository**, such as your org's `.github` repository:
+
+```yaml
+name: Judgement config
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main] # replace if the default branch has another name
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    uses: elroy-galbraith/judgement-gate/.github/workflows/lint-config.yml@VALIDATOR_COMMIT_SHA
+    # Optional, relative to this config repository's root:
+    # with:
+    #   config-path: .github/judgement-gate.yml
+```
+
+Replace `VALIDATOR_COMMIT_SHA` with the full commit SHA of a judgement-gate revision containing the reusable workflow. Choose the same revision deployed to your Worker so CI and runtime agree on the supported schema, and update the pin when upgrading. The workflow automatically checks out its validator at that exact revision using GitHub's [`job.workflow_repository` and `job.workflow_sha` contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context). These contexts require GitHub.com; for GitHub Enterprise Server, use the local command in your own workflow with a pinned validator checkout.
+
+The workflow checks the proposed merge config on PRs, and the merge-group commit when using a merge queue. It checks out the config and validator separately and only installs/runs code from the validator checkout. It uses a read-only token, passes no secrets, and runs no code from the config repository. Keep the caller on `pull_request`, without path filters, so the required check reports on every PR. Use `merge_group` if the branch uses a merge queue. Do not use `pull_request_target` to validate PR content.
+
+### Owners and branch protection
+
+Add `.github/CODEOWNERS` in the config repository, replacing `@your-org/config-owners` with your team:
+
+```text
+/.github/judgement-gate.yml @your-org/config-owners
+/.github/workflows/ @your-org/config-owners
+/.github/CODEOWNERS @your-org/config-owners
+```
+
+On that repository's default branch, require pull requests, Code Owner review, dismissal of stale approvals after new commits, and the `config / lint-config` status check (select the reported check after the first run). Apply the requirements to administrators or restrict bypasses as appropriate for your organisation. Protecting the workflow and CODEOWNERS file means removing validation or changing ownership also needs owner review.
+
+Lint validates structure, not policy intent: removing a judgement, changing a threshold, or widening `satisfied_by` can be valid YAML and still weaken the rulebook. Code Owner review covers those changes. A built-in judgement that reviews policy changes is a separate, optional follow-up.
+
 ## Repository scope and judgement modes
 
 `repos` and `mode` work on every entry kind: built-in `use:`, declarative judgements, and classifiers. Repository globs match the **target repository name** (for example `cac-api`), case-sensitively, without the owner prefix. A fork PR uses the target repository's name, not the fork's. Matches are an OR within `repos`; repository scope and existing `applies_to`/`ignore` file filters must both match. An out-of-scope judgement contributes no questions to the shared Jev request and no result to routing or the summary. If nothing applies, Jev is not called and the check passes with "No applicable judgements". Empty lists, non-string/blank entries, and invalid mode values are config errors.
