@@ -16,12 +16,12 @@
     "adversarial": "esbuild scripts/adversarial.ts --bundle --packages=external --platform=node --format=esm --log-level=warning --outfile=.wrangler/adversarial.mjs && node .wrangler/adversarial.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261016.1",
+    "@cloudflare/workers-types": "^5.20261104.1",
     "@types/node": "^24.19.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5",
-    "wrangler": "^4.151.1"
+    "vitest": "^5.1.0",
+    "wrangler": "^4.158.0"
   },
   "dependencies": {
     "yaml": "^2.9.1"
